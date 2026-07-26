@@ -1,12 +1,13 @@
 package com.limou.agent.ai.tools;
 
 import cn.hutool.json.JSONObject;
+import org.springframework.ai.tool.ToolCallback;
 
 /**
  * 工具基类
  * 定义所有工具的通用接口
  */
-public abstract class BaseTool {
+public abstract class BaseTool{
 
     /**
      * 获取工具的英文名称（对应方法名）

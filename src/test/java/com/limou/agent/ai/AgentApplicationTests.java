@@ -1,4 +1,4 @@
-package com.limou.agent;
+package com.limou.agent.ai;
 
 import com.limou.agent.ai.AgentServiceFactory;
 import jakarta.annotation.Resource;
@@ -11,7 +11,7 @@ class AgentApplicationTests {
 private AgentServiceFactory agentServiceFactory;
     @Test
     void contextLoads() {
-        agentServiceFactory.doChat("你好");
+        agentServiceFactory.doAgentChat("你好","1");
     }
 
 }

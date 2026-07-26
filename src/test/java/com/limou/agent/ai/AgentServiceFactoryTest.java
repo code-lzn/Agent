@@ -9,8 +9,8 @@ class AgentServiceFactoryTest {
     @Resource
     private AgentServiceFactory agentServiceFactory;
 
-    @Test
-    void doChat() {
-        agentServiceFactory.doChat("");
-    }
+//    @Test
+//    void doChat() {
+//        agentServiceFactory.doChat("123");
+//    }
 }
