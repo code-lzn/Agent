@@ -32,8 +32,8 @@ public class AiConfig {
     }
 
     @Bean
-    @Primary
-    ChatClient chatClient(ChatMemory chatMemory) {
+//    @Primary
+    ChatClient deepSeekchatClient(ChatMemory chatMemory) {
 
         ChatClient chatClient = ChatClient.builder(deepseekChatModel)
                 .defaultSystem(systemPrompt)

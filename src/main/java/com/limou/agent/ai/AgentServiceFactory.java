@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class AgentServiceFactory {
     @Resource
-    private ChatClient chatClient;
+    private ChatClient deepSeekchatClient;
     @Resource
     private ToolManager toolManager;
 
@@ -19,7 +19,7 @@ public class AgentServiceFactory {
      * AI 基础对话（支持多轮对话记忆）
      */
     public String doChat(String message) {
-        ChatResponse chatResponse = chatClient
+        ChatResponse chatResponse = deepSeekchatClient
                 .prompt()
                 .user(message)
                 .tools(toolManager.getAllTools())
