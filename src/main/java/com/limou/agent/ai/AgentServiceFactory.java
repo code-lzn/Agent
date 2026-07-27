@@ -1,5 +1,6 @@
 package com.limou.agent.ai;
 
+import cn.hutool.json.JSONUtil;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
@@ -28,6 +29,8 @@ public class AgentServiceFactory {
     private ToolCallback[] toolCallbacks;
     @Resource
     private ObjectMapper objectMapper;
+    @Resource
+    private ToolCallbackProvider toolCallbackProvider;
 
     // ---- ChatClient 系列 ----
 
@@ -35,6 +38,7 @@ public class AgentServiceFactory {
         String content = deepSeekchatClient
                 .prompt()
                 .user(message)
+                .toolCallbacks(toolCallbackProvider)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
@@ -66,13 +70,14 @@ public class AgentServiceFactory {
             return "Agent 执行出错: " + e.getMessage();
         }
     }
-
+//
     public <T> Optional<T> doAgentChatStructured(String message, String conversationId,
                                                   Class<T> outputType) {
         ReactAgent agent = reactAgentFactory.createAgent(outputType, "structured-ReAct-agent");
         try {
             String json = agent.call(message, buildConfig(conversationId)).getText();
             log.info("Agent 结构化: {}", json);
+//            return JSONUtil.toBean(json,outputType);
             return Optional.ofNullable(objectMapper.readValue(json, outputType));
         } catch (GraphRunnerException e) {
             log.error("Agent 结构化输出失败", e);

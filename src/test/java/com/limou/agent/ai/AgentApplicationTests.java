@@ -11,7 +11,7 @@ class AgentApplicationTests {
 private AgentServiceFactory agentServiceFactory;
     @Test
     void contextLoads() {
-        agentServiceFactory.doAgentChat("你好","1");
+        agentServiceFactory.doChat("你好河南科技大学附近有啥","1");
     }
 
 }
