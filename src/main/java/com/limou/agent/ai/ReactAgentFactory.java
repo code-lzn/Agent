@@ -6,7 +6,7 @@ import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
-import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Component;
@@ -20,7 +20,7 @@ public class ReactAgentFactory {
 
     private final DeepSeekChatModel deepseekChatModel;
     private final DashScopeChatModel dashScopeChatModel;
-    private final ToolCallback[] tools;
+    private final ToolCallbackProvider mergedToolCallbacks;
 
     @Value("classpath:prompts/system-prompt.st")
     private Resource systemPrompt;
@@ -39,7 +39,7 @@ public class ReactAgentFactory {
                 .model(deepseekChatModel)
                 .systemPrompt(readSystemPrompt())
                 .saver(new MemorySaver())
-                .tools(tools);
+                .tools(mergedToolCallbacks.getToolCallbacks());
     }
 
     private String readSystemPrompt() {
