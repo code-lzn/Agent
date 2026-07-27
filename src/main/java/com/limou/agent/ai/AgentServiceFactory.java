@@ -30,7 +30,9 @@ public class AgentServiceFactory {
     @Resource
     private ObjectMapper objectMapper;
     @Resource
-    private ToolCallbackProvider toolCallbackProvider;
+    private ToolCallbackProvider mergedToolCallbacks;
+//    @Resource
+//    private ToolCallbackProvider toolCallbackProvider;
 
     // ---- ChatClient 系列 ----
 
@@ -38,11 +40,9 @@ public class AgentServiceFactory {
         String content = deepSeekchatClient
                 .prompt()
                 .user(message)
-                .toolCallbacks(toolCallbackProvider)
                 .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, conversationId))
                 .call()
                 .content();
-        log.info("Chat 响应: {}", content);
         return content;
     }
 

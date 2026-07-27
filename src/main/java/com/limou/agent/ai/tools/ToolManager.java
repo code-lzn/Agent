@@ -3,7 +3,6 @@ package com.limou.agent.ai.tools;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
@@ -11,7 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @Component
@@ -21,6 +19,9 @@ public class ToolManager {
     @Resource
     private BaseTool[] tools;
     private static final Map<String, BaseTool> toolMap = new HashMap<>();
+
+    @Resource
+    private ToolCallbackProvider mcpToolCallbackProvider;
 
 
     @PostConstruct
@@ -34,6 +35,7 @@ public class ToolManager {
 
     /**
      * 根据工具名称获取工具实例
+     *
      * @param toolName 工具名称
      * @return 工具实例
      */
@@ -41,9 +43,9 @@ public class ToolManager {
         return toolMap.get(toolName);
     }
 
-    //得到所有工具
+    // 本地 ToolCallback[]，供 ReactAgentFactory 使用
     @Bean
-    public ToolCallback[] toolCallbacks(){
+    public ToolCallback[] toolCallbacks() {
         //进行数据的
         ExitTool exitTool = new ExitTool();
         FileReadTool fileReadTool = new FileReadTool();
@@ -59,6 +61,23 @@ public class ToolManager {
                 fileModifyTool,
                 fileDirReadTool
         );
-
+    }
+    // 合并本地 + MCP 外部工具，供 ChatClient.Builder 使用
+    @Bean
+    public ToolCallbackProvider mergedToolCallbacks(ToolCallback[] localToolCallbacks) {
+        return () -> {
+            ToolCallback[] mcp = mcpToolCallbackProvider != null
+                    ? mcpToolCallbackProvider.getToolCallbacks()
+                    : new ToolCallback[0];
+            ToolCallback[] all = new ToolCallback[localToolCallbacks.length + mcp.length];
+            System.arraycopy(localToolCallbacks, 0, all, 0, localToolCallbacks.length);
+            System.arraycopy(mcp, 0, all, localToolCallbacks.length, mcp.length);
+            log.info("合并工具: 本地 {} 个, MCP {} 个, 总计 {} 个",
+                    localToolCallbacks.length, mcp.length, all.length);
+            return all;
+        };
     }
 }
+
+
+

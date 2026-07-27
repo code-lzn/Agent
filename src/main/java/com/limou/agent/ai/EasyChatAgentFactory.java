@@ -9,7 +9,7 @@ import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
-import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -24,9 +24,10 @@ public class EasyChatAgentFactory {
     private Resource systemPrompt;
 
     private final DeepSeekChatModel deepseekChatModel;
-    private  final DashScopeChatModel dashScopeChatModel;
-//    private final ChatModel chatModel;
-    private final ToolCallback[] tools;
+    private final DashScopeChatModel dashScopeChatModel;
+    @Qualifier("mergedToolCallbacks")
+    private final ToolCallbackProvider mergedToolCallbacks;
+//    private  final ToolCallback[] toolCallbacks;
 
     @Bean
     public ChatMemory deepSeekChatMemory() {
@@ -48,11 +49,12 @@ public class EasyChatAgentFactory {
     private ChatClient buildChatClient(ChatModel model, ChatMemory chatMemory) {
         return ChatClient.builder(model)
                 .defaultSystem(systemPrompt)
+                .defaultToolCallbacks(mergedToolCallbacks)
+//                .defaultToolCallbacks(toolCallbacks)---只用本地
                 .defaultAdvisors(
                         MessageChatMemoryAdvisor.builder(chatMemory)
                                 .build()
                 )
-                .defaultToolCallbacks(tools)
                 .build();
     }
 
