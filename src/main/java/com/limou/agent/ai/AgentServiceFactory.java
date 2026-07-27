@@ -13,7 +13,9 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 import java.util.Optional;
 
@@ -46,6 +48,16 @@ public class AgentServiceFactory {
         return content;
     }
 
+//    流式接口的实现
+    public Flux<String> doChatStream(String message, String conversationId) {
+        return deepSeekchatClient
+                .prompt()
+                .user(message)
+                .advisors(spec -> spec.param(ChatMemory.CONVERSATION_ID, conversationId))
+                .stream()
+                .content();
+    }
+
     public <T> T doChatStructured(String message, String conversationId, Class<T> outputType) {
         T result = deepSeekchatClient
                 .prompt()
@@ -70,9 +82,10 @@ public class AgentServiceFactory {
             return "Agent 执行出错: " + e.getMessage();
         }
     }
-//
+
+    //
     public <T> Optional<T> doAgentChatStructured(String message, String conversationId,
-                                                  Class<T> outputType) {
+                                                 Class<T> outputType) {
         ReactAgent agent = reactAgentFactory.createAgent(outputType, "structured-ReAct-agent");
         try {
             String json = agent.call(message, buildConfig(conversationId)).getText();
