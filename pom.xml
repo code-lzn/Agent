@@ -82,10 +82,10 @@
             <artifactId>spring-ai-starter-model-deepseek</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.springframework.ai</groupId>-->
+<!--            <artifactId>spring-ai-starter-model-openai</artifactId>-->
+<!--        </dependency>-->
 
         <!--        aop切面-->
         <dependency>
@@ -98,6 +98,14 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
             <version>5.8.38</version>
+        </dependency>
+
+
+        <!--        https://cloud.tencent.com/document/product/436/10199 cos对象存储-->
+        <dependency>
+            <groupId>com.qcloud</groupId>
+            <artifactId>cos_api</artifactId>
+            <version>5.6.227</version>
         </dependency>
 
         <dependency>
@@ -153,6 +161,12 @@
             <artifactId>HikariCP</artifactId>
         </dependency>
 
+        <!-- jsoup HTML 解析库 -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.19.1</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

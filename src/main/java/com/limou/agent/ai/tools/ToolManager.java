@@ -53,13 +53,22 @@ public class ToolManager {
         FileDeleteTool fileDeleteTool = new FileDeleteTool();
         FileModifyTool fileModifyTool = new FileModifyTool();
         FileDirReadTool fileDirReadTool = new FileDirReadTool();
+        ImageSearchTool imageSearchTool = new ImageSearchTool();
+        MermaidDiagramTool mermaidDiagramTool = new MermaidDiagramTool();
+        UndrawIllustrationTool undrawIllustrationTool = new UndrawIllustrationTool();
+        WebScrapingTool webScrapingTool = new WebScrapingTool();
+
         return ToolCallbacks.from(
                 exitTool,
                 fileReadTool,
                 fileWriteTool,
                 fileDeleteTool,
                 fileModifyTool,
-                fileDirReadTool
+                fileDirReadTool,
+                imageSearchTool,
+                mermaidDiagramTool,
+                undrawIllustrationTool,
+                webScrapingTool
         );
     }
     // 合并本地 + MCP 外部工具，供 ChatClient.Builder 使用
