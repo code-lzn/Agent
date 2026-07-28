@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.limou</groupId>
-    <artifactId>ai-code-mother-backend</artifactId>
+    <artifactId>agent-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>ai-code-mother</name>
-    <description>ai-code-mother</description>
+    <name>Agent</name>
+    <description>Agent</description>
     <url/>
     <licenses>
         <license/>

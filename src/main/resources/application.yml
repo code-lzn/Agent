@@ -1,0 +1,107 @@
+spring:
+  application:
+    name: agent-backend
+#  datasource:
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+#    url: jdbc:mysql://localhost:3306/ai_code
+#    username: root
+#    password: LZNlzn123.
+#
+#      # Redis 配置
+  data:
+    redis:
+      database: ${spring.data.redis.database}
+      host: ${spring.data.redis.host}
+      port: ${spring.data.redis.port}
+      timeout: ${spring.data.redis.timeout}
+      ttl: ${spring.data.redis.ttl}
+  ai:
+    deepseek:
+      api-key: ${DEEPSEEK_API_KEY}
+      chat:
+        options:
+          model: deepseek-v4-flash
+    alibaba:
+      memory:
+        chat:
+          type: redis
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  session:
+    timeout: 2592000
+  profiles:
+    active: dev
+
+logging:
+  level:
+    org.springframework.ai: debug
+
+server:
+  port: 8123
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        # session过期时间30天
+        max-age: 2592000
+# springdoc-openapi
+springdoc:
+  group-configs:
+    - group: 'default'
+      packages-to-scan: com.limou.agent.controller
+# knife4j
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+cos:
+  client:
+    region: ${cos.client.region}
+    secretId: ${cos.client.secretId}
+    secretKey: ${cos.client.secretKey}
+    host: ${cos.client.host}
+    bucket: ${cos.client.bucket}
+# AI
+#langchain4j:
+#  open-ai:
+#    chat-model:
+#      base-url: https://api.deepseek.com
+#      api-key: ${langchain4j.open-ai.chat-model.api-key}
+#      model-name: deepseek-chat
+#      log-requests: true
+#      log-responses: true
+#      strict-json-schema: true
+#      response-format: json_object
+#    streaming-chat-model:
+#      base-url: https://api.deepseek.com
+#      api-key: ${langchain4j.open-ai.chat-model.api-key}
+#      model-name: deepseek-chat
+#      max-tokens: 8192
+#      log-requests: true
+#      log-responses: true
+#    reasoning-streaming-chat-model:
+#      base-url: https://api.deepseek.com
+#      api-key: ${langchain4j.open-ai.chat-model.api-key}
+#      model-name: deepseek-chat
+#      max-tokens: 8192
+#      temperature: 0.1
+#      log-requests: true
+#      log-responses: true
+#    routing-chat-model:
+#      base-url: https://api.deepseek.com
+#      api-key: ${langchain4j.open-ai.chat-model.api-key}
+#      model-name: deepseek-chat
+#      log-requests: true
+#      log-responses: true
+
+
+# Pexels 图片搜索配置
+pexels:
+  api-key: ${pexels.api-key}
+# 阿里云 DashScope 配置
+dashscope:
+  api-key: ${dashscope.api-key}
+  image-model: ${dashscope.image-model}

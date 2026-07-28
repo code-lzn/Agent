@@ -1,6 +1,6 @@
 -- 用户表
-create database if not exists AI_Code;
-use AI_Code;
+create database if not exists szml;
+use szml;
 create table if not exists user
 (
     id           bigint auto_increment comment 'id' primary key,
