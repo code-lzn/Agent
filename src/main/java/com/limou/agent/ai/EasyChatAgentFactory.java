@@ -5,7 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
+import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
@@ -27,47 +27,32 @@ public class EasyChatAgentFactory {
     private final DashScopeChatModel dashScopeChatModel;
     @Qualifier("mergedToolCallbacks")
     private final ToolCallbackProvider mergedToolCallbacks;
-//    private  final ToolCallback[] toolCallbacks;
 
     @Bean
-    public ChatMemory deepSeekChatMemory() {
+    public ChatMemory chatMemory(ChatMemoryRepository chatMemoryRepository) {
         return MessageWindowChatMemory.builder()
-                .chatMemoryRepository(new InMemoryChatMemoryRepository())
+                .chatMemoryRepository(chatMemoryRepository)
                 .maxMessages(10)
                 .build();
     }
 
-    @Bean
-    public ChatMemory dashScopeChatMemory() {
-        return MessageWindowChatMemory.builder()
-                .chatMemoryRepository(new InMemoryChatMemoryRepository())
-                .maxMessages(10)
-                .build();
-    }
-
-    // 2. 抽取私有工厂方法
     private ChatClient buildChatClient(ChatModel model, ChatMemory chatMemory) {
         return ChatClient.builder(model)
                 .defaultSystem(systemPrompt)
                 .defaultToolCallbacks(mergedToolCallbacks)
-//                .defaultToolCallbacks(toolCallbacks)---只用本地
                 .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory)
-                                .build()
+                        MessageChatMemoryAdvisor.builder(chatMemory).build()
                 )
                 .build();
     }
 
-    // 3. 分别暴露两个 Bean，并指定明确名称（默认方法名即可）
     @Bean
-    public ChatClient deepSeekChatClient(DeepSeekChatModel deepSeekModel,
-                                         @Qualifier("deepSeekChatMemory") ChatMemory deepSeekMemory) {
-        return buildChatClient(deepseekChatModel, deepSeekMemory);
+    public ChatClient deepSeekChatClient(ChatMemory chatMemory) {
+        return buildChatClient(deepseekChatModel, chatMemory);
     }
 
     @Bean
-    public ChatClient dashScopeChatClient(DashScopeChatModel dashScopeModel,
-                                          @Qualifier("dashScopeChatMemory") ChatMemory dashScopeMemory) {
-        return buildChatClient(dashScopeChatModel, dashScopeMemory);
+    public ChatClient dashScopeChatClient(ChatMemory chatMemory) {
+        return buildChatClient(dashScopeChatModel, chatMemory);
     }
 }
