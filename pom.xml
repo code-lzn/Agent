@@ -85,6 +85,17 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-deepseek</artifactId>
         </dependency>
+        <!-- 内存向量库（RAG） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-vector-store</artifactId>
+        </dependency>
+        <!-- Markdown 文档解析 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-markdown-document-reader</artifactId>
+            <version>1.0.0</version>
+        </dependency>
 
 <!--        <dependency>-->
 <!--            <groupId>org.springframework.ai</groupId>-->

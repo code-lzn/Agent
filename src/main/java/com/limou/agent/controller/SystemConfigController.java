@@ -1,6 +1,7 @@
 package com.limou.agent.controller;
 
 import com.mybatisflex.core.paginate.Page;
+import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,7 +24,7 @@ import java.util.List;
 @RequestMapping("/systemConfig")
 public class SystemConfigController {
 
-    @Autowired
+    @Resource
     private SystemConfigService systemConfigService;
 
     /**
