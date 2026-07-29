@@ -1,6 +1,5 @@
 package com.limou.agent.model.entity;
 
-
 import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
@@ -11,13 +10,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
-import java.util.Date;
+import java.time.LocalDateTime;
 
 /**
  * 订单
- * @TableName order
+ * @TableName `order`
  */
 @Data
 @Builder
@@ -25,50 +25,62 @@ import java.util.Date;
 @AllArgsConstructor
 @Table("order")
 public class Order implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
     /**
      * 主键ID
      */
-    @Id(keyType = KeyType.Generator,value = KeyGenerators.snowFlakeId)
+    @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
     private Long id;
 
     /**
      * 订单编号（唯一）
      */
+    @Column("orderNo")
     private String orderNo;
 
     /**
      * 用户ID
      */
+    @Column("userId")
     private Long userId;
 
     /**
      * 场次ID
      */
+    @Column("scheduleId")
     private Long scheduleId;
 
     /**
      * 影片名称（冗余）
      */
+    @Column("filmName")
     private String filmName;
 
     /**
      * 影院名称（冗余）
      */
+    @Column("cinemaName")
     private String cinemaName;
 
     /**
      * 放映时间（冗余）
      */
+    @Column("scheduleTime")
     private String scheduleTime;
 
     /**
      * 影厅名称（冗余）
      */
-    private String hallname;
+    @Column("hallName")
+    private String hallName;
 
     /**
      * 订单总价（元）
      */
+    @Column("totalPrice")
     private BigDecimal totalPrice;
 
     /**
@@ -84,43 +96,39 @@ public class Order implements Serializable {
     /**
      * 取消原因: timeout/user_cancelled
      */
+    @Column("cancelReason")
     private String cancelReason;
 
     /**
      * 支付宝交易号（沙箱生成）
      */
+    @Column("alipayTradeNo")
     private String alipayTradeNo;
 
     /**
      * 支付宝状态
      */
+    @Column("alipayStatus")
     private String alipayStatus;
 
     /**
      * 实际支付时间
      */
-    private Date paidAt;
+    @Column("paidAt")
+    private LocalDateTime paidAt;
 
     /**
      * 超时截止时间（创建时间+15分钟）
      */
-    private Date expireAt;
-
-    /**
-     * 
-     */
-    private Integer isDelete;
-
-    /**
-     * 
-     */
-    private Date createTime;
-
-    /**
-     * 
-     */
-    private Date updateTime;
+    @Column("expireAt")
+    private LocalDateTime expireAt;
 
     @Column(value = "isDelete", isLogicDelete = true)
-    private static final long serialVersionUID = 1L;
+    private Boolean isDelete;
+
+    @Column("createTime")
+    private LocalDateTime createTime;
+
+    @Column("updateTime")
+    private LocalDateTime updateTime;
 }

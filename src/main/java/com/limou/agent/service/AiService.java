@@ -1,5 +1,6 @@
 package com.limou.agent.service;
 
+import org.springframework.http.codec.ServerSentEvent;
 import reactor.core.publisher.Flux;
 
 import java.util.Optional;
@@ -50,4 +51,24 @@ public interface AiService {
      * @return 响应结果
      */
     <T> Optional<T> doAgentChatStructured(String message, String conversationId, Class<T> outputType);
+
+    /**
+     * 电影票 Agent 对话
+     *
+     * @param message        用户输入
+     * @param conversationId 会话ID
+     * @param userId         用户ID（用于偏好加载）
+     * @return 响应结果
+     */
+    String doMovieChat(String message, String conversationId, Long userId);
+
+    /**
+     * 电影票 Agent 流式对话
+     *
+     * @param message        用户输入
+     * @param conversationId 会话ID
+     * @param userId         用户ID
+     * @return 流式响应
+     */
+    Flux<ServerSentEvent<String>> doMovieChatStream(String message, String conversationId, Long userId);
 }

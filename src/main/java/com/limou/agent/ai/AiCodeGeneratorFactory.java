@@ -2,19 +2,21 @@ package com.limou.agent.ai;
 
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
-import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
+import com.alibaba.cloud.ai.graph.checkpoint.savers.redis.RedisSaver;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.limou.agent.service.ChatHistoryService;
 import jakarta.annotation.Resource;
+import org.redisson.api.RedissonClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,6 +26,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
+
+import reactor.core.publisher.Flux;
 
 @Slf4j
 @Component
@@ -41,6 +45,8 @@ public class AiCodeGeneratorFactory {
     private ChatMemoryRepository chatMemoryRepository;
     @Resource
     private ChatHistoryService chatHistoryService;
+    @Resource
+    private RedissonClient redissonClient;
     @Resource
     private ObjectMapper objectMapper;
 
@@ -87,12 +93,12 @@ public class AiCodeGeneratorFactory {
 
 
     private ReactAgent createAgent(String cacheKey, String name) {
-        log.info("创建新的 ReactAgent，name: {}", cacheKey);
+
         return ReactAgent.builder()
                 .name(name)
                 .model(chatModel)
                 .systemPrompt(readSystemPrompt())
-                .saver(new MemorySaver())
+                .saver(RedisSaver.builder().redisson(redissonClient).build())
                 .tools(mergedToolCallbacks.getToolCallbacks())
                 .build();
     }
@@ -107,6 +113,58 @@ public class AiCodeGeneratorFactory {
             log.error("Agent 执行失败", e);
             return "Agent 执行出错: " + e.getMessage();
         }
+    }
+
+    /**
+     * 通用 Agent 对话 —— 支持自定义系统提示词、工具集和 Agent 名称
+     * 供电影票 Agent 等子模块复用
+     */
+    public String doAgentChat(String message, String conversationId,
+                              String systemPrompt, ToolCallback[] tools, String agentName) {
+        String cacheKey = conversationId + ":" + agentName;
+        ReactAgent agent = agentCache.get(cacheKey, key ->
+                ReactAgent.builder()
+                        .name(agentName)
+                        .model(chatModel)
+                        .systemPrompt(systemPrompt)
+                        .saver(RedisSaver.builder().redisson(redissonClient).build())
+                        .tools(tools)
+                        .build()
+        );
+        try {
+            String result = agent.call(message, buildConfig(conversationId)).getText();
+            log.info("{} 响应: {}", agentName, result);
+            return result;
+        } catch (GraphRunnerException e) {
+            log.error("{} 执行失败", agentName, e);
+            return "Agent 执行出错: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 通用 Agent 流式对话 —— 使用 ChatClient 实现真正的 token 级流式输出
+     */
+    public Flux<String> doAgentChatStream(String message, String conversationId,
+                                          String systemPrompt, ToolCallback[] tools, String agentName) {
+        MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(chatMemoryRepository)
+                .maxMessages(20)
+                .build();
+        chatHistoryService.loadChatHistory(Long.valueOf(conversationId), chatMemory, 20);
+        ChatClient chatClient = ChatClient.builder(chatModel)
+                .defaultSystem(systemPrompt)
+                .defaultToolCallbacks(tools)
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .build();
+        return chatClient.prompt()
+                .user(message)
+                .stream()
+                .content();
+    }
+
+    /** 清除指定 Agent 缓存 */
+    public void evictAgentCache(String conversationId, String agentName) {
+        agentCache.invalidate(conversationId + ":" + agentName);
     }
 
     public <T> Optional<T> doAgentChatStructured(String message, String conversationId, Class<T> outputType) {

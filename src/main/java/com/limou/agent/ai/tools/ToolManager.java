@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
@@ -73,7 +74,7 @@ public class ToolManager {
     }
     // 合并本地 + MCP 外部工具，供 ChatClient.Builder 使用
     @Bean
-    public ToolCallbackProvider mergedToolCallbacks(ToolCallback[] localToolCallbacks) {
+    public ToolCallbackProvider mergedToolCallbacks(@Qualifier("toolCallbacks") ToolCallback[] localToolCallbacks) {
         return () -> {
             ToolCallback[] mcp = mcpToolCallbackProvider != null
                     ? mcpToolCallbackProvider.getToolCallbacks()
