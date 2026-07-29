@@ -43,7 +43,7 @@ public class ToolManager {
         return toolMap.get(toolName);
     }
 
-    // 本地 ToolCallback[]，供 ReactAgentFactory 使用
+    // 本地 ToolCallback[]，供 AiCodeGeneratorFactory 使用
     @Bean
     public ToolCallback[] toolCallbacks() {
         //进行数据的

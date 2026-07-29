@@ -52,7 +52,11 @@
             <artifactId>spring-ai-alibaba-agent-framework</artifactId>
             <version>1.1.2.0</version>
         </dependency>
-
+<!--        caffine-->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
         <!--        mcp的接入-->
         <dependency>
             <groupId>org.springframework.ai</groupId>
