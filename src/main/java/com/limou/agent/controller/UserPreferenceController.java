@@ -1,4 +1,4 @@
-package com.limou.aicodemother.genresult.controller;
+package com.limou.agent.controller;
 
 import com.mybatisflex.core.paginate.Page;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -9,86 +9,86 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.limou.agent.model.entity.ChatHistory;
-import com.limou.agent.service.ChatHistoryService;
+import com.limou.agent.model.entity.UserPreference;
+import com.limou.agent.service.UserPreferenceService;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 对话历史 控制层。
+ *  控制层。
  *
  * @author 李振南
  */
 @RestController
-@RequestMapping("/chatHistory")
-public class ChatHistoryController {
+@RequestMapping("/userPreference")
+public class UserPreferenceController {
 
     @Autowired
-    private ChatHistoryService chatHistoryService;
+    private UserPreferenceService userPreferenceService;
 
     /**
-     * 保存对话历史。
+     * 保存。
      *
-     * @param chatHistory 对话历史
+     * @param userPreference 
      * @return {@code true} 保存成功，{@code false} 保存失败
      */
     @PostMapping("save")
-    public boolean save(@RequestBody ChatHistory chatHistory) {
-        return chatHistoryService.save(chatHistory);
+    public boolean save(@RequestBody UserPreference userPreference) {
+        return userPreferenceService.save(userPreference);
     }
 
     /**
-     * 根据主键删除对话历史。
+     * 根据主键删除。
      *
      * @param id 主键
      * @return {@code true} 删除成功，{@code false} 删除失败
      */
     @DeleteMapping("remove/{id}")
     public boolean remove(@PathVariable Long id) {
-        return chatHistoryService.removeById(id);
+        return userPreferenceService.removeById(id);
     }
 
     /**
-     * 根据主键更新对话历史。
+     * 根据主键更新。
      *
-     * @param chatHistory 对话历史
+     * @param userPreference 
      * @return {@code true} 更新成功，{@code false} 更新失败
      */
     @PutMapping("update")
-    public boolean update(@RequestBody ChatHistory chatHistory) {
-        return chatHistoryService.updateById(chatHistory);
+    public boolean update(@RequestBody UserPreference userPreference) {
+        return userPreferenceService.updateById(userPreference);
     }
 
     /**
-     * 查询所有对话历史。
+     * 查询所有。
      *
      * @return 所有数据
      */
     @GetMapping("list")
-    public List<ChatHistory> list() {
-        return chatHistoryService.list();
+    public List<UserPreference> list() {
+        return userPreferenceService.list();
     }
 
     /**
-     * 根据主键获取对话历史。
+     * 根据主键获取。
      *
-     * @param id 对话历史主键
-     * @return 对话历史详情
+     * @param id 主键
+     * @return 详情
      */
     @GetMapping("getInfo/{id}")
-    public ChatHistory getInfo(@PathVariable Long id) {
-        return chatHistoryService.getById(id);
+    public UserPreference getInfo(@PathVariable Long id) {
+        return userPreferenceService.getById(id);
     }
 
     /**
-     * 分页查询对话历史。
+     * 分页查询。
      *
      * @param page 分页对象
      * @return 分页对象
      */
     @GetMapping("page")
-    public Page<ChatHistory> page(Page<ChatHistory> page) {
-        return chatHistoryService.page(page);
+    public Page<UserPreference> page(Page<UserPreference> page) {
+        return userPreferenceService.page(page);
     }
 
 }

@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 
 import java.io.Serial;
 
-import com.mybatisflex.core.keygen.KeyGenerators;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,52 +23,42 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("chat_session")
-public class ChatSession implements Serializable {
+@Table("system_config")
+public class SystemConfig implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
     /**
-     * id
+     * 主键ID
      */
-    @Id(keyType = KeyType.Generator,value = KeyGenerators.snowFlakeId)
+    @Id(keyType = KeyType.Auto)
     private Long id;
 
     /**
-     * 会话名称
+     * 配置键
      */
-    @Column("sessionName")
-    private String sessionName;
+    @Column("configKey")
+    private String configKey;
 
     /**
-     * 创建用户id
+     * 配置值（JSON格式）
      */
-    @Column("userId")
-    private Long userId;
+    @Column("configValue")
+    private String configValue;
 
     /**
-     * 编辑时间
+     * 配置说明
      */
-    @Column("editTime")
-    private LocalDateTime editTime;
+    private String description;
 
-    /**
-     * 创建时间
-     */
+    @Column(value = "isDelete", isLogicDelete = true)
+    private Boolean isDelete;
+
     @Column("createTime")
     private LocalDateTime createTime;
 
-    /**
-     * 更新时间
-     */
     @Column("updateTime")
     private LocalDateTime updateTime;
-
-    /**
-     * 是否删除
-     */
-    @Column(value = "isDelete", isLogicDelete = true)
-    private Integer isDelete;
 
 }

@@ -50,3 +50,183 @@ create table chat_session
     INDEX idx_appName (sessionName),         -- 提升基于应用名称的查询性能
     INDEX idx_userId (userId)            -- 提升基于用户 ID 的查询性能
 ) comment '应用' collate = utf8mb4_unicode_ci;
+
+
+CREATE TABLE `user_preference` (
+                                   `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                                   `userId`            BIGINT       NOT NULL COMMENT '用户ID',
+                                   `preferredTypes`    VARCHAR(255) DEFAULT NULL COMMENT '偏好影片类型，逗号分隔',
+                                   `preferredHallType` VARCHAR(50)  DEFAULT NULL COMMENT '偏好厅型: IMAX/杜比/普通/4DX/VIP',
+                                   `budgetMax`         DECIMAL(10,2) DEFAULT NULL COMMENT '单张票价预算上限（元）',
+                                   `frequentCinemaId`  BIGINT       DEFAULT NULL COMMENT '常去影院ID',
+                                   `preferredSeatZone` VARCHAR(50)  DEFAULT NULL COMMENT '常用座位区域: 中间/靠前/靠后/靠边',
+                                   `isDelete`          TINYINT(1)   NOT NULL DEFAULT 0,
+                                   `createTime`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                   `updateTime`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                   PRIMARY KEY (`id`),
+                                   UNIQUE KEY `uk_userId` (`userId`),
+                                   KEY `idx_frequentCinema` (`frequentCinemaId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户偏好画像';
+
+
+CREATE TABLE `film` (
+                        `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                        `name`        VARCHAR(100) NOT NULL COMMENT '影片名称',
+                        `englishName` VARCHAR(100) DEFAULT NULL COMMENT '英文名称',
+                        `type`        VARCHAR(100) DEFAULT NULL COMMENT '影片类型，逗号分隔',
+                        `rating`      DECIMAL(3,1) DEFAULT NULL COMMENT '评分 1.0-10.0',
+                        `duration`    INT          NOT NULL COMMENT '片长（分钟）',
+                        `posterUrl`   VARCHAR(500) DEFAULT NULL COMMENT '海报图片地址',
+                        `releaseDate` DATE         DEFAULT NULL COMMENT '上映日期',
+                        `director`    VARCHAR(100) DEFAULT NULL COMMENT '导演',
+                        `actors`      VARCHAR(500) DEFAULT NULL COMMENT '主演，逗号分隔',
+                        `description` TEXT         DEFAULT NULL COMMENT '影片简介（最多500字）',
+                        `status`      VARCHAR(20)  NOT NULL DEFAULT 'draft' COMMENT '状态: draft/published/offline',
+                        `isDelete`    TINYINT(1)   NOT NULL DEFAULT 0,
+                        `createTime`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        `updateTime`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`id`),
+                        KEY `idx_status` (`status`),
+                        KEY `idx_rating` (`rating`),
+                        KEY `idx_releaseDate` (`releaseDate`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影片';
+
+
+CREATE TABLE `cinema` (
+                          `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                          `name`          VARCHAR(100) NOT NULL COMMENT '影院名称',
+                          `address`       VARCHAR(255) DEFAULT NULL COMMENT '详细地址',
+                            `city`          VARCHAR(50)    DEFAULT NULL COMMENT '城市',
+                          `longitude`     DECIMAL(10,6) DEFAULT NULL COMMENT '经度（高德坐标系）',
+                          `latitude`      DECIMAL(10,6) DEFAULT NULL COMMENT '纬度（高德坐标系）',
+                          `phone`         VARCHAR(20)  DEFAULT NULL COMMENT '联系电话',
+                          `businessHours` VARCHAR(50)  DEFAULT NULL COMMENT '营业时间: 09:00-23:00',
+                          `tags`          VARCHAR(255) DEFAULT NULL COMMENT '特色标签，逗号分隔',
+                          `basePrice`     DECIMAL(10,2) DEFAULT NULL COMMENT '基准票价（元）',
+                          `status`        VARCHAR(20)  NOT NULL DEFAULT 'draft' COMMENT '状态: draft/published/offline',
+                          `isDelete`      TINYINT(1)   NOT NULL DEFAULT 0,
+                          `createTime`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                          `updateTime`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                          PRIMARY KEY (`id`),
+                          KEY `idx_status` (`status`),
+                          KEY `idx_location` (`longitude`, `latitude`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影院';
+
+CREATE TABLE `hall` (
+                        `id`           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                        `cinemaId`     BIGINT      NOT NULL COMMENT '所属影院ID',
+                        `name`         VARCHAR(50) NOT NULL COMMENT '影厅名称',
+                        `hallType`     VARCHAR(50) NOT NULL DEFAULT '普通' COMMENT '厅型: IMAX/杜比/普通/4DX/VIP',
+                        `rowCount`     INT         NOT NULL COMMENT '座位行数',
+                        `colCount`     INT         NOT NULL COMMENT '座位列数',
+                        `seatTemplate` JSON        DEFAULT NULL COMMENT '座位模板JSON（特殊座位标记等）',
+                        `isDelete`     TINYINT(1)  NOT NULL DEFAULT 0,
+                        `createTime`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        `updateTime`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`id`),
+                        KEY `idx_cinemaId` (`cinemaId`),
+                        KEY `idx_hallType` (`hallType`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影厅';
+
+CREATE TABLE `schedule` (
+                            `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                            `filmId`     BIGINT       NOT NULL COMMENT '影片ID',
+                            `cinemaId`   BIGINT       NOT NULL COMMENT '影院ID',
+                            `hallId`     BIGINT       NOT NULL COMMENT '影厅ID',
+                            `showDate`   DATE         NOT NULL COMMENT '放映日期',
+                            `startTime`  TIME         NOT NULL COMMENT '开场时间',
+                            `endTime`    TIME         NOT NULL COMMENT '散场时间（自动计算: startTime + 片长 + 15min）',
+                            `price`      DECIMAL(10,2) NOT NULL COMMENT '标准票价（元）',
+                            `vipPrice`   DECIMAL(10,2) DEFAULT NULL COMMENT 'VIP区票价（元）',
+                            `status`     VARCHAR(20)  NOT NULL DEFAULT 'draft' COMMENT '状态: draft/published/offline/soldOut',
+                            `isDelete`   TINYINT(1)   NOT NULL DEFAULT 0,
+                            `createTime` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            `updateTime` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            PRIMARY KEY (`id`),
+                            KEY `idx_filmId` (`filmId`),
+                            KEY `idx_cinemaId` (`cinemaId`),
+                            KEY `idx_hallId` (`hallId`),
+                            KEY `idx_showDate` (`showDate`),
+                            KEY `idx_film_date` (`filmId`, `showDate`),
+                            KEY `idx_cinema_date` (`cinemaId`, `showDate`),
+                            KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='放映场次';
+
+
+CREATE TABLE `seat` (
+                        `id`         BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                        `scheduleId` BIGINT      NOT NULL COMMENT '场次ID',
+                        `hallId`     BIGINT      NOT NULL COMMENT '影厅ID',
+                        `rowNum`     INT         NOT NULL COMMENT '行号（从1开始）',
+                        `colNum`     INT         NOT NULL COMMENT '列号（从1开始）',
+                        `seatLabel`  VARCHAR(10) NOT NULL COMMENT '座位标签: 5排6座',
+                        `zone`       VARCHAR(20) NOT NULL DEFAULT 'regular' COMMENT '区域: vip/regular',
+                        `status`     VARCHAR(20) NOT NULL DEFAULT 'available' COMMENT '状态: available/locked/sold',
+                        `isDelete`   TINYINT(1)  NOT NULL DEFAULT 0,
+                        `createTime` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        `updateTime` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`id`),
+                        KEY `idx_scheduleId` (`scheduleId`),
+                        KEY `idx_hallId` (`hallId`),
+                        KEY `idx_schedule_zone` (`scheduleId`, `zone`),
+                        KEY `idx_schedule_status` (`scheduleId`, `status`),
+                        UNIQUE KEY `uk_schedule_seat` (`scheduleId`, `rowNum`, `colNum`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='座位（场次快照）';
+
+CREATE TABLE `order` (
+                         `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                         `orderNo`       VARCHAR(64)  NOT NULL COMMENT '订单编号（唯一）',
+                         `userId`        BIGINT       NOT NULL COMMENT '用户ID',
+                         `scheduleId`    BIGINT       NOT NULL COMMENT '场次ID',
+                         `filmName`      VARCHAR(100) DEFAULT NULL COMMENT '影片名称（冗余）',
+                         `cinemaName`    VARCHAR(100) DEFAULT NULL COMMENT '影院名称（冗余）',
+                         `scheduleTime`  VARCHAR(50)  DEFAULT NULL COMMENT '放映时间（冗余）',
+                         `hallName`      VARCHAR(50)  DEFAULT NULL COMMENT '影厅名称（冗余）',
+                         `totalPrice`    DECIMAL(10,2) NOT NULL COMMENT '订单总价（元）',
+                         `count`         INT          NOT NULL COMMENT '购票数量',
+                         `status`        VARCHAR(20)  NOT NULL DEFAULT 'pending' COMMENT '状态: pending/paid/cancelled/completed',
+                         `cancelReason`  VARCHAR(50)  DEFAULT NULL COMMENT '取消原因: timeout/user_cancelled',
+                         `alipayTradeNo` VARCHAR(100) DEFAULT NULL COMMENT '支付宝交易号（沙箱生成）',
+                         `alipayStatus`  VARCHAR(50)  DEFAULT NULL COMMENT '支付宝状态',
+                         `paidAt`        DATETIME     DEFAULT NULL COMMENT '实际支付时间',
+                         `expireAt`      DATETIME     DEFAULT NULL COMMENT '超时截止时间（创建时间+15分钟）',
+                         `isDelete`      TINYINT(1)   NOT NULL DEFAULT 0,
+                         `createTime`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                         `updateTime`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                         PRIMARY KEY (`id`),
+                         UNIQUE KEY `uk_orderNo` (`orderNo`),
+                         KEY `idx_userId` (`userId`),
+                         KEY `idx_scheduleId` (`scheduleId`),
+                         KEY `idx_status` (`status`),
+                         KEY `idx_expireAt` (`expireAt`),
+                         KEY `idx_user_status` (`userId`, `status`),
+                         KEY `idx_alipayTradeNo` (`alipayTradeNo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单';
+
+
+CREATE TABLE `order_seat` (
+                              `id`         BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                              `orderId`    BIGINT      NOT NULL COMMENT '订单ID',
+                              `seatId`     BIGINT      NOT NULL COMMENT '座位ID',
+                              `seatLabel`  VARCHAR(10) NOT NULL COMMENT '座位标签（冗余: 5排6座）',
+                              `isUsed`     TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '是否已使用: 0-未使用 1-已核销',
+                              `isDelete`   TINYINT(1)  NOT NULL DEFAULT 0,
+                              `createTime` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                              `updateTime` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                              PRIMARY KEY (`id`),
+                              KEY `idx_orderId` (`orderId`),
+                              KEY `idx_seatId` (`seatId`),
+                              KEY `idx_order_seat` (`orderId`, `seatId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单-座位关联（电子票）';
+
+CREATE TABLE `system_config` (
+                                 `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                                 `configKey`   VARCHAR(100) NOT NULL COMMENT '配置键',
+                                 `configValue` JSON         NOT NULL COMMENT '配置值（JSON格式）',
+                                 `description` VARCHAR(255) DEFAULT NULL COMMENT '配置说明',
+                                 `isDelete`    TINYINT(1)   NOT NULL DEFAULT 0,
+                                 `createTime`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                 `updateTime`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                 PRIMARY KEY (`id`),
+                                 UNIQUE KEY `uk_configKey` (`configKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置';

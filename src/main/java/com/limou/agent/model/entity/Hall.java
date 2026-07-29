@@ -24,52 +24,60 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("chat_session")
-public class ChatSession implements Serializable {
+@Table("hall")
+public class Hall implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
     /**
-     * id
+     * 主键ID
      */
     @Id(keyType = KeyType.Generator,value = KeyGenerators.snowFlakeId)
     private Long id;
 
     /**
-     * 会话名称
+     * 所属影院ID
      */
-    @Column("sessionName")
-    private String sessionName;
+    @Column("cinemaId")
+    private Long cinemaId;
 
     /**
-     * 创建用户id
+     * 影厅名称
      */
-    @Column("userId")
-    private Long userId;
+    private String name;
 
     /**
-     * 编辑时间
+     * 厅型: IMAX/杜比/普通/4DX/VIP
      */
-    @Column("editTime")
-    private LocalDateTime editTime;
+    @Column("hallType")
+    private String hallType;
 
     /**
-     * 创建时间
+     * 座位行数
      */
+    @Column("rowCount")
+    private Integer rowCount;
+
+    /**
+     * 座位列数
+     */
+    @Column("colCount")
+    private Integer colCount;
+
+    /**
+     * 座位模板JSON（特殊座位标记等）
+     */
+    @Column("seatTemplate")
+    private String seatTemplate;
+
+    @Column(value = "isDelete", isLogicDelete = true)
+    private Boolean isDelete;
+
     @Column("createTime")
     private LocalDateTime createTime;
 
-    /**
-     * 更新时间
-     */
     @Column("updateTime")
     private LocalDateTime updateTime;
-
-    /**
-     * 是否删除
-     */
-    @Column(value = "isDelete", isLogicDelete = true)
-    private Integer isDelete;
 
 }

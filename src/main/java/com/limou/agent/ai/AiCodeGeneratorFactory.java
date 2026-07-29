@@ -66,6 +66,11 @@ public class AiCodeGeneratorFactory {
         return clientCache.get(sessionId, this::createChatClient);
     }
 
+    // ---- ReactAgent ----
+
+    private ReactAgent getOrCreateAgent(String conversationId, String name) {
+        return agentCache.get(conversationId + ":" + name, key -> createAgent(key, name));
+    }
     private ChatClient createChatClient(Long sessionId) {
         log.info("为 sessionId: {} 创建新的 ChatClient", sessionId);
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -80,11 +85,6 @@ public class AiCodeGeneratorFactory {
                 .build();
     }
 
-    // ---- ReactAgent ----
-
-    private ReactAgent getOrCreateAgent(String conversationId, String name) {
-        return agentCache.get(conversationId + ":" + name, key -> createAgent(key, name));
-    }
 
     private ReactAgent createAgent(String cacheKey, String name) {
         log.info("创建新的 ReactAgent，name: {}", cacheKey);
@@ -109,7 +109,6 @@ public class AiCodeGeneratorFactory {
         }
     }
 
-    @SuppressWarnings("unchecked")
     public <T> Optional<T> doAgentChatStructured(String message, String conversationId, Class<T> outputType) {
         ReactAgent agent = getOrCreateAgent(conversationId, "structured-ReAct-agent");
         try {

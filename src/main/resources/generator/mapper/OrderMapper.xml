@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="generator.mapper.OrderMapper">
+    <sql id="Base_Column_List">
+        id,orderNo,userId,scheduleId,filmName,cinemaName,
+        scheduleTime,hallName,totalPrice,count,status,
+        cancelReason,alipayTradeNo,alipayStatus,paidAt,expireAt,
+        isDelete,createTime,updateTime
+    </sql>
+</mapper>

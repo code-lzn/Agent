@@ -9,7 +9,6 @@ import java.time.LocalDateTime;
 
 import java.io.Serial;
 
-import com.mybatisflex.core.keygen.KeyGenerators;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,52 +23,49 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table("chat_session")
-public class ChatSession implements Serializable {
+@Table("order_seat")
+public class OrderSeat implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
     /**
-     * id
+     * 主键ID
      */
-    @Id(keyType = KeyType.Generator,value = KeyGenerators.snowFlakeId)
+    @Id(keyType = KeyType.Auto)
     private Long id;
 
     /**
-     * 会话名称
+     * 订单ID
      */
-    @Column("sessionName")
-    private String sessionName;
+    @Column("orderId")
+    private Long orderId;
 
     /**
-     * 创建用户id
+     * 座位ID
      */
-    @Column("userId")
-    private Long userId;
+    @Column("seatId")
+    private Long seatId;
 
     /**
-     * 编辑时间
+     * 座位标签（冗余: 5排6座）
      */
-    @Column("editTime")
-    private LocalDateTime editTime;
+    @Column("seatLabel")
+    private String seatLabel;
 
     /**
-     * 创建时间
+     * 是否已使用: 0-未使用 1-已核销
      */
+    @Column("isUsed")
+    private Boolean isUsed;
+
+    @Column(value = "isDelete", isLogicDelete = true)
+    private Boolean isDelete;
+
     @Column("createTime")
     private LocalDateTime createTime;
 
-    /**
-     * 更新时间
-     */
     @Column("updateTime")
     private LocalDateTime updateTime;
-
-    /**
-     * 是否删除
-     */
-    @Column(value = "isDelete", isLogicDelete = true)
-    private Integer isDelete;
 
 }
