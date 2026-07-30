@@ -45,15 +45,15 @@ public class MovieAgentController {
     /**
      * 电影票 Agent 对话（GET，方便测试）
      */
-    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
-    public String doChatGet(
-            @RequestParam String message,
-            @RequestParam String conversationId,
-            @RequestParam(required = false) Long userId) {
-        log.info("MovieAgent GET: conversationId={}, userId={}", conversationId, userId);
-        return aiService.doMovieChat(message, conversationId, userId);
-    }
+//    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
+//    public String doChatGet(
+//            @RequestParam String message,
+//            @RequestParam String conversationId,
+//            @RequestParam(required = false) Long userId) {
+//        log.info("MovieAgent GET: conversationId={}, userId={}", conversationId, userId);
+//        return aiService.doMovieChat(message, conversationId, userId);
+//    }
 
     /**
      * 电影票 Agent 流式对话（SSE）

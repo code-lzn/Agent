@@ -97,7 +97,6 @@ public class AiServiceImpl implements AiService {
     @Override
     public Flux<ServerSentEvent<String>> doMovieChatStream(String message, String conversationId, Long userId) {
         log.info("MovieAgent 流式对话: conversationId={}, userId={}", conversationId, userId);
-
         if (userId != null) {
             var state = movieStateManager.getState(conversationId);
             state.setUserId(userId);

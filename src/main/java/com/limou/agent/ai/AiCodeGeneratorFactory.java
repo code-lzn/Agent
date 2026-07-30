@@ -7,12 +7,14 @@ import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.limou.agent.rag.DocumentRagService;
 import com.limou.agent.service.ChatHistoryService;
 import jakarta.annotation.Resource;
 import org.redisson.api.RedissonClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
@@ -49,21 +51,21 @@ public class AiCodeGeneratorFactory {
     private RedissonClient redissonClient;
     @Resource
     private ObjectMapper objectMapper;
+    @Resource
+    private DocumentRagService documentRagService;
 
     private final Cache<Long, ChatClient> clientCache = Caffeine.newBuilder()
             .maximumSize(1000)
             .expireAfterWrite(Duration.ofMinutes(30))
             .expireAfterAccess(Duration.ofMinutes(10))
-            .removalListener((key, value, cause) ->
-                    log.debug("ChatClient 缓存移除，sessionId: {}, 原因: {}", key, cause))
+            .removalListener((key, value, cause) -> log.debug("ChatClient 缓存移除，sessionId: {}, 原因: {}", key, cause))
             .build();
 
     private final Cache<String, ReactAgent> agentCache = Caffeine.newBuilder()
             .maximumSize(1000)
             .expireAfterWrite(Duration.ofMinutes(30))
             .expireAfterAccess(Duration.ofMinutes(10))
-            .removalListener((key, value, cause) ->
-                    log.debug("ReactAgent 缓存移除，key: {}, 原因: {}", key, cause))
+            .removalListener((key, value, cause) -> log.debug("ReactAgent 缓存移除，key: {}, 原因: {}", key, cause))
             .build();
 
     // ---- ChatClient ----
@@ -90,7 +92,6 @@ public class AiCodeGeneratorFactory {
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
     }
-
 
     private ReactAgent createAgent(String cacheKey, String name) {
 
@@ -120,17 +121,15 @@ public class AiCodeGeneratorFactory {
      * 供电影票 Agent 等子模块复用
      */
     public String doAgentChat(String message, String conversationId,
-                              String systemPrompt, ToolCallback[] tools, String agentName) {
+            String systemPrompt, ToolCallback[] tools, String agentName) {
         String cacheKey = conversationId + ":" + agentName;
-        ReactAgent agent = agentCache.get(cacheKey, key ->
-                ReactAgent.builder()
-                        .name(agentName)
-                        .model(chatModel)
-                        .systemPrompt(systemPrompt)
-                        .saver(RedisSaver.builder().redisson(redissonClient).build())
-                        .tools(tools)
-                        .build()
-        );
+        ReactAgent agent = agentCache.get(cacheKey, key -> ReactAgent.builder()
+                .name(agentName)
+                .model(chatModel)
+                .systemPrompt(systemPrompt)
+                .saver(RedisSaver.builder().redisson(redissonClient).build())
+                .tools(tools)
+                .build());
         try {
             String result = agent.call(message, buildConfig(conversationId)).getText();
             log.info("{} 响应: {}", agentName, result);
@@ -142,10 +141,11 @@ public class AiCodeGeneratorFactory {
     }
 
     /**
-     * 通用 Agent 流式对话 —— 使用 ChatClient 实现真正的 token 级流式输出
+     * 通用 Agent 流式对话 -- 使用 ChatClient 实现真正的 token 级流式输出
+     * 通过 QuestionAnswerAdvisor 集成 RAG 知识库
      */
     public Flux<String> doAgentChatStream(String message, String conversationId,
-                                          String systemPrompt, ToolCallback[] tools, String agentName) {
+            String systemPrompt, ToolCallback[] tools, String agentName) {
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(chatMemoryRepository)
                 .maxMessages(20)
@@ -154,7 +154,9 @@ public class AiCodeGeneratorFactory {
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(systemPrompt)
                 .defaultToolCallbacks(tools)
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .defaultAdvisors(
+                        QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
+                        MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
         return chatClient.prompt()
                 .user(message)

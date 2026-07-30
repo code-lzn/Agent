@@ -90,6 +90,11 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-vector-store</artifactId>
         </dependency>
+        <!-- RAG 问答 Advisor -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-advisors-vector-store</artifactId>
+        </dependency>
         <!-- Markdown 文档解析 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
