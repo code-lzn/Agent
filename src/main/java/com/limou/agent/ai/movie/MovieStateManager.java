@@ -65,55 +65,11 @@ public class MovieStateManager {
     }
 
     /**
-     * 合并槽位：将 newState 中的非空字段合并到现有状态中
-     */
-    public ConversationState mergeState(String conversationId, ConversationState newState) {
-        ConversationState existing = getState(conversationId);
-
-        if (newState.getFilmId() != null) existing.setFilmId(newState.getFilmId());
-        if (newState.getFilmName() != null) existing.setFilmName(newState.getFilmName());
-        if (newState.getFilmType() != null) existing.setFilmType(newState.getFilmType());
-        if (newState.getCinemaId() != null) existing.setCinemaId(newState.getCinemaId());
-        if (newState.getCinemaName() != null) existing.setCinemaName(newState.getCinemaName());
-        if (newState.getLocationTag() != null) existing.setLocationTag(newState.getLocationTag());
-        if (newState.getHallType() != null) existing.setHallType(newState.getHallType());
-        if (newState.getShowDate() != null) existing.setShowDate(newState.getShowDate());
-        if (newState.getStartTime() != null) existing.setStartTime(newState.getStartTime());
-        if (newState.getScheduleId() != null) existing.setScheduleId(newState.getScheduleId());
-        if (newState.getHallName() != null) existing.setHallName(newState.getHallName());
-        if (newState.getTicketCount() != null) existing.setTicketCount(newState.getTicketCount());
-        if (newState.getBudgetMax() != null) existing.setBudgetMax(newState.getBudgetMax());
-        if (newState.getSeatIds() != null && !newState.getSeatIds().isEmpty()) {
-            existing.setSeatIds(newState.getSeatIds());
-        }
-        if (newState.getSeatLabels() != null && !newState.getSeatLabels().isEmpty()) {
-            existing.setSeatLabels(newState.getSeatLabels());
-        }
-        if (newState.getTotalPrice() != null) existing.setTotalPrice(newState.getTotalPrice());
-        if (newState.getOrderId() != null) existing.setOrderId(newState.getOrderId());
-        if (newState.getPreferredSeatZone() != null) existing.setPreferredSeatZone(newState.getPreferredSeatZone());
-        if (newState.getCurrentStep() != null) existing.setCurrentStep(newState.getCurrentStep());
-        if (newState.isPreferencesLoaded()) existing.setPreferencesLoaded(true);
-        if (newState.getUserId() != null) existing.setUserId(newState.getUserId());
-
-        saveState(conversationId, existing);
-        return existing;
-    }
-
-    /**
      * 清除会话状态
      */
     public void clearState(String conversationId) {
         getBucket(conversationId).delete();
         log.debug("清除对话状态: conversationId={}", conversationId);
-    }
-
-    /**
-     * 生成注入 prompt 的状态上下文文本
-     */
-    public String generateStatePrompt(String conversationId) {
-        ConversationState state = getState(conversationId);
-        return state.toPromptContext();
     }
 
     /**

@@ -4,6 +4,7 @@ import com.limou.agent.ai.ratelimiter.annotation.RateLimit;
 import com.limou.agent.ai.ratelimiter.enums.RateLimitType;
 import com.limou.agent.model.dto.movie.MovieChatRequest;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.tools.LockSeatsTool;
 import com.limou.agent.service.AiService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,9 @@ public class MovieAgentController {
 
     @Resource
     private MovieStateManager movieStateManager;
+
+    @Resource
+    private LockSeatsTool lockSeatsTool;
 
     /**
      * 电影票 Agent 对话（POST，支持 JSON 请求体）
@@ -72,8 +76,9 @@ public class MovieAgentController {
     @PostMapping("/reset")
     public String resetConversation(@RequestParam String conversationId) {
         movieStateManager.clearState(conversationId);
-        aiService.doAgentChat("重置对话", conversationId); // 清除 Agent 的 checkpoint
+        lockSeatsTool.releaseStaleLocks(); // 释放过期座位锁
+        aiService.doAgentChat("重置对话", conversationId);
         log.info("MovieAgent 重置: conversationId={}", conversationId);
-        return "{\"success\":true,\"message\":\"会话已重置\"}";
+        return "{\"success\":true,\"message\":\"会话已重置，座位锁已清理\"}";
     }
 }

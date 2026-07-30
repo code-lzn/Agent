@@ -79,6 +79,7 @@ public class AiCodeGeneratorFactory {
     private ReactAgent getOrCreateAgent(String conversationId, String name) {
         return agentCache.get(conversationId + ":" + name, key -> createAgent(key, name));
     }
+
     private ChatClient createChatClient(Long sessionId) {
         log.info("为 sessionId: {} 创建新的 ChatClient", sessionId);
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -141,10 +142,10 @@ public class AiCodeGeneratorFactory {
     }
 
     /**
-     * 通用 Agent 流式对话 -- 使用 ChatClient 实现真正的 token 级流式输出
-     * 通过 QuestionAnswerAdvisor 集成 RAG 知识库
+     * 通用 Agent 流式对话 —— ChatClient.stream() 实现 token 级流式输出
+     * Spring AI 内部自动处理多轮工具调用，工具执行期间会有短暂停顿
      */
-    public Flux<String> doAgentChatStream(String message, String conversationId,
+    public Flux<StreamChunk> doAgentChatStream(String message, String conversationId,
             String systemPrompt, ToolCallback[] tools, String agentName) {
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(chatMemoryRepository)
@@ -161,7 +162,17 @@ public class AiCodeGeneratorFactory {
         return chatClient.prompt()
                 .user(message)
                 .stream()
-                .content();
+                .chatResponse()
+                .flatMap(response -> {
+                    if (response.getResults() == null || response.getResults().isEmpty()) {
+                        return reactor.core.publisher.Flux.empty();
+                    }
+                    String text = response.getResults().get(0).getOutput().getText();
+                    if (text != null && !text.isEmpty()) {
+                        return reactor.core.publisher.Flux.just(StreamChunk.text(text));
+                    }
+                    return reactor.core.publisher.Flux.empty();
+                });
     }
 
     /** 清除指定 Agent 缓存 */

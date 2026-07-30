@@ -2,8 +2,13 @@ package com.limou.agent.service.impl;
 
 import cn.hutool.json.JSONUtil;
 import com.limou.agent.ai.AiCodeGeneratorFactory;
+import com.limou.agent.ai.StreamChunk;
+import com.limou.agent.ai.movie.MovieAgentWorkflow;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.WorkflowDecision;
+import com.limou.agent.model.entity.ChatHistory;
 import com.limou.agent.service.AiService;
+import com.limou.agent.service.ChatHistoryService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -31,10 +36,16 @@ public class AiServiceImpl implements AiService {
     private MovieStateManager movieStateManager;
 
     @Resource
+    private MovieAgentWorkflow movieAgentWorkflow;
+
+    @Resource
+    private ChatHistoryService chatHistoryService;
+
+    @Resource
     @Qualifier("movieToolCallbacks")
     private ToolCallback[] movieToolCallbacks;
 
-    @Value("classpath:prompts/movie-agent-prompt.st")
+    @Value("classpath:prompts/movie-agent-prompt.md")
     private org.springframework.core.io.Resource moviePrompt;
 
     private String movieSystemPromptCache;
@@ -69,27 +80,23 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public String doMovieChat(String message, String conversationId, Long userId) {
-        log.info("MovieAgent 对话: conversationId={}, userId={}, message={}",
-                conversationId, userId, message);
+        log.info("MovieAgent 对话: conversationId={}, userId={}", conversationId, userId);
 
-        // 加载对话状态，注入上下文
-        if (userId != null) {
-            var state = movieStateManager.getState(conversationId);
-            state.setUserId(userId);
-            movieStateManager.saveState(conversationId, state);
+        // 1. GuardRail 安全检查
+        WorkflowDecision decision = movieAgentWorkflow.execute(message, conversationId, userId);
+        if (decision.isBlocked()) {
+            return decision.getBlockMessage();
         }
-        String stateContext = movieStateManager.generateStatePrompt(conversationId);
-        String augmentedMessage = stateContext + "\n【用户输入】\n" + message;
 
-        // 懒加载 system prompt
+        // 2. ReactAgent 全量工具，多轮 ReAct 循环
         String prompt = getMovieSystemPrompt();
-
         String response = aiCodeGeneratorFactory.doAgentChat(
-                augmentedMessage, conversationId, prompt, movieToolCallbacks, "movie-agent");
+                decision.getAugmentedMessage(), conversationId, prompt, movieToolCallbacks, "movie-agent");
 
-        // 刷新状态 TTL
+        // 3. 持久化对话历史，避免重启失忆
+        saveMovieChatHistory(conversationId, userId, message, response);
+
         movieStateManager.refreshTtl(conversationId);
-
         log.info("MovieAgent 响应长度: {}", response != null ? response.length() : 0);
         return response;
     }
@@ -97,29 +104,58 @@ public class AiServiceImpl implements AiService {
     @Override
     public Flux<ServerSentEvent<String>> doMovieChatStream(String message, String conversationId, Long userId) {
         log.info("MovieAgent 流式对话: conversationId={}, userId={}", conversationId, userId);
-        if (userId != null) {
-            var state = movieStateManager.getState(conversationId);
-            state.setUserId(userId);
-            movieStateManager.saveState(conversationId, state);
-        }
-        String stateContext = movieStateManager.generateStatePrompt(conversationId);
-        String augmentedMessage = stateContext + "\n【用户输入】\n" + message;
 
+        // 1. GuardRail 安全检查
+        WorkflowDecision decision = movieAgentWorkflow.execute(message, conversationId, userId);
+
+        if (decision.isBlocked()) {
+            return Flux.just(
+                    ServerSentEvent.<String>builder()
+                            .data(JSONUtil.toJsonStr(Map.of("d", decision.getBlockMessage())))
+                            .build(),
+                    ServerSentEvent.<String>builder()
+                            .event("done")
+                            .data("")
+                            .build())
+                    .doFinally(signal -> movieStateManager.refreshTtl(conversationId));
+        }
+
+        // 2. ChatClient 流式 + 全量工具，Spring AI 内部处理多轮工具调用
         String prompt = getMovieSystemPrompt();
+        StringBuilder fullResponse = new StringBuilder();
 
         return aiCodeGeneratorFactory.doAgentChatStream(
-                augmentedMessage, conversationId, prompt, movieToolCallbacks, "movie-agent"
-        ).map(chunk -> {
-            String jsonStr = JSONUtil.toJsonStr(Map.of("d", chunk));
-            return ServerSentEvent.<String>builder()
-                    .data(jsonStr)
-                    .build();
-        }).concatWith(Mono.just(
-                ServerSentEvent.<String>builder()
-                        .event("done")
-                        .data("")
-                        .build()
-        )).doFinally(signal -> movieStateManager.refreshTtl(conversationId));
+                decision.getAugmentedMessage(), conversationId, prompt, movieToolCallbacks, "movie-agent")
+                .map(chunk -> {
+                    fullResponse.append(chunk.content());
+                    String jsonStr = JSONUtil.toJsonStr(Map.of("d", chunk.content()));
+                    return ServerSentEvent.<String>builder()
+                            .data(jsonStr)
+                            .build();
+                })
+                .concatWith(Mono.just(
+                        ServerSentEvent.<String>builder()
+                                .event("done")
+                                .data("")
+                                .build()))
+                .doFinally(signal -> {
+                    saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
+                    movieStateManager.refreshTtl(conversationId);
+                });
+    }
+
+    private void saveMovieChatHistory(String conversationId, Long userId, String userMessage, String aiResponse) {
+        try {
+            Long sessionId = Long.valueOf(conversationId);
+            chatHistoryService.save(ChatHistory.builder()
+                    .sessionId(sessionId).userId(userId)
+                    .messageType("user").message(userMessage).build());
+            chatHistoryService.save(ChatHistory.builder()
+                    .sessionId(sessionId).userId(userId)
+                    .messageType("ai").message(aiResponse).build());
+        } catch (Exception e) {
+            log.error("保存电影对话历史失败: conversationId={}", conversationId, e);
+        }
     }
 
     private String getMovieSystemPrompt() {
