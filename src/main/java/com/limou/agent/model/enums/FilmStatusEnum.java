@@ -8,7 +8,10 @@ public enum FilmStatusEnum {
 
     DRAFT("draft", "草稿"),
     PUBLISHED("published", "已发布"),
-    OFFLINE("offline", "已下线");
+    OFFLINE("offline", "已下线"),
+    // 新增两个状态
+    NOW_SHOWING("now_showing", "正在热映"),   // 或 "showing"
+    UPCOMING("upcoming", "即将上映");        // 或 "coming_soon"
 
     private final String value;
     private final String text;
