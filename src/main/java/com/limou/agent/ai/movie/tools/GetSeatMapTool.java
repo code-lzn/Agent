@@ -12,6 +12,7 @@ import com.limou.agent.model.entity.Seat;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RedissonClient;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -40,6 +41,9 @@ public class GetSeatMapTool extends BaseTool {
     @Resource
     private ObjectMapper objectMapper;
 
+    @Resource
+    private RedissonClient redissonClient;
+
     @Tool(description = "获取指定场次的座位图，返回二维座位矩阵JSON。每个座位包含 seatId、行列号、标签、区域(vip/regular)、状态(available/locked/sold)、价格")
     public String getSeatMap(
             @ToolParam(description = "场次ID") Long scheduleId
@@ -64,7 +68,24 @@ public class GetSeatMapTool extends BaseTool {
                             .orderBy(Seat::getColNum, true)
             );
 
-            // 3. 构建二维座位矩阵
+            // 3. 清理过期锁（Redis 锁已过期但 DB 状态仍为 locked 的脏数据）
+            int released = 0;
+            for (Seat seat : seats) {
+                if ("locked".equals(seat.getStatus())) {
+                    String lockKey = "seat:lock:" + scheduleId + ":" + seat.getId();
+                    if (!redissonClient.getLock(lockKey).isLocked()) {
+                        seat.setStatus("available");
+                        seatMapper.update(Seat.builder()
+                                .id(seat.getId()).status("available").build());
+                        released++;
+                    }
+                }
+            }
+            if (released > 0) {
+                log.info("getSeatMap 自动释放过期锁: scheduleId={}, count={}", scheduleId, released);
+            }
+
+            // 4. 构建二维座位矩阵
             int rowCount = hall.getRowCount() != null ? hall.getRowCount() : 0;
             int colCount = hall.getColCount() != null ? hall.getColCount() : 0;
 

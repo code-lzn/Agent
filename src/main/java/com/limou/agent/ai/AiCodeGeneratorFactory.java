@@ -27,9 +27,11 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 
 @Slf4j
 @Component
@@ -143,10 +145,25 @@ public class AiCodeGeneratorFactory {
 
     /**
      * 通用 Agent 流式对话 —— ChatClient.stream() 实现 token 级流式输出
-     * Spring AI 内部自动处理多轮工具调用，工具执行期间会有短暂停顿
+     * Spring AI 内部自动处理多轮工具调用，工具执行期间会短暂停顿
+     *
+     * @param toolDisplayNames 工具英文名 → 中文显示名的映射，用于流式输出"正在XXX..."提示
      */
     public Flux<StreamChunk> doAgentChatStream(String message, String conversationId,
-            String systemPrompt, ToolCallback[] tools, String agentName) {
+            String systemPrompt, ToolCallback[] tools,
+            Map<String, String> toolDisplayNames, String agentName) {
+        Sinks.Many<StreamChunk> toolSink = Sinks.many().replay().all();
+
+        // 包装工具，调用时发射 tool_start 事件
+        ToolCallback[] wrappedTools = new ToolCallback[tools.length];
+        for (int i = 0; i < tools.length; i++) {
+            String toolName = tools[i].getToolDefinition().name();
+            String displayName = toolDisplayNames != null
+                    ? toolDisplayNames.getOrDefault(toolName, toolName)
+                    : toolName;
+            wrappedTools[i] = new EventEmittingToolCallback(tools[i], displayName, toolSink);
+        }
+
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(chatMemoryRepository)
                 .maxMessages(20)
@@ -154,25 +171,49 @@ public class AiCodeGeneratorFactory {
         chatHistoryService.loadChatHistory(Long.valueOf(conversationId), chatMemory, 20);
         ChatClient chatClient = ChatClient.builder(chatModel)
                 .defaultSystem(systemPrompt)
-                .defaultToolCallbacks(tools)
+                .defaultToolCallbacks(wrappedTools)
                 .defaultAdvisors(
                         QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
-        return chatClient.prompt()
+
+        Flux<StreamChunk> chatStream = chatClient.prompt()
                 .user(message)
                 .stream()
                 .chatResponse()
                 .flatMap(response -> {
                     if (response.getResults() == null || response.getResults().isEmpty()) {
-                        return reactor.core.publisher.Flux.empty();
+                        return Flux.empty();
                     }
                     String text = response.getResults().get(0).getOutput().getText();
                     if (text != null && !text.isEmpty()) {
-                        return reactor.core.publisher.Flux.just(StreamChunk.text(text));
+                        return Flux.just(StreamChunk.text(text));
                     }
-                    return reactor.core.publisher.Flux.empty();
-                });
+                    return Flux.empty();
+                })
+                .doFinally(signal -> toolSink.tryEmitComplete());
+
+        return Flux.merge(toolSink.asFlux(), chatStream);
+    }
+
+    /** ToolCallback 包装器：在工具调用时向 Sink 发射 tool_start 事件 */
+    private record EventEmittingToolCallback(
+            ToolCallback delegate,
+            String displayName,
+            Sinks.Many<StreamChunk> sink
+    ) implements ToolCallback {
+
+        @Override
+        public String call(String toolInput) {
+            sink.tryEmitNext(StreamChunk.toolStart(
+                    delegate.getToolDefinition().name(), displayName));
+            return delegate.call(toolInput);
+        }
+
+        @Override
+        public org.springframework.ai.tool.definition.ToolDefinition getToolDefinition() {
+            return delegate.getToolDefinition();
+        }
     }
 
     /** 清除指定 Agent 缓存 */

@@ -2,9 +2,9 @@ package com.limou.agent.service.impl;
 
 import cn.hutool.json.JSONUtil;
 import com.limou.agent.ai.AiCodeGeneratorFactory;
-import com.limou.agent.ai.StreamChunk;
 import com.limou.agent.ai.movie.MovieAgentWorkflow;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.MovieToolManager;
 import com.limou.agent.ai.movie.WorkflowDecision;
 import com.limou.agent.model.entity.ChatHistory;
 import com.limou.agent.service.AiService;
@@ -40,6 +40,9 @@ public class AiServiceImpl implements AiService {
 
     @Resource
     private ChatHistoryService chatHistoryService;
+
+    @Resource
+    private MovieToolManager movieToolManager;
 
     @Resource
     @Qualifier("movieToolCallbacks")
@@ -121,16 +124,26 @@ public class AiServiceImpl implements AiService {
         }
 
         // 2. ChatClient 流式 + 全量工具，Spring AI 内部处理多轮工具调用
+        //    工具调用时发射 tool_start 事件 → 前端显示"正在搜索影片..."
         String prompt = getMovieSystemPrompt();
         StringBuilder fullResponse = new StringBuilder();
 
         return aiCodeGeneratorFactory.doAgentChatStream(
-                decision.getAugmentedMessage(), conversationId, prompt, movieToolCallbacks, "movie-agent")
+                decision.getAugmentedMessage(), conversationId, prompt,
+                movieToolCallbacks, movieToolManager.getToolDisplayNames(), "movie-agent")
                 .map(chunk -> {
+                    if ("tool_start".equals(chunk.type())) {
+                        String msg = "正在" + chunk.toolDisplayName() + "...";
+                        return ServerSentEvent.<String>builder()
+                                .data(JSONUtil.toJsonStr(Map.of(
+                                        "d", msg,
+                                        "type", "tool_start",
+                                        "toolName", chunk.toolName())))
+                                .build();
+                    }
                     fullResponse.append(chunk.content());
-                    String jsonStr = JSONUtil.toJsonStr(Map.of("d", chunk.content()));
                     return ServerSentEvent.<String>builder()
-                            .data(jsonStr)
+                            .data(JSONUtil.toJsonStr(Map.of("d", chunk.content())))
                             .build();
                 })
                 .concatWith(Mono.just(

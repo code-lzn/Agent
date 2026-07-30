@@ -9,6 +9,9 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 电影票 Agent 工具管理器
  * 注册所有电影票相关的工具，生成独立的 ToolCallbackProvider
@@ -73,5 +76,21 @@ public class MovieToolManager {
         log.info("电影票 Agent 工具注册完成: 本地 {} 个, MCP {} 个, 共 {} 个",
                 local.length, mcp.length, callbacks.length);
         return callbacks;
+    }
+
+    /**
+     * 获取工具英文名 → 中文显示名的映射（用于流式输出工具状态）
+     */
+    public Map<String, String> getToolDisplayNames() {
+        Map<String, String> map = new LinkedHashMap<>();
+        map.put(searchFilmsTool.getToolName(), searchFilmsTool.getDisplayName());
+        map.put(searchCinemasTool.getToolName(), searchCinemasTool.getDisplayName());
+        map.put(searchSchedulesTool.getToolName(), searchSchedulesTool.getDisplayName());
+        map.put(getSeatMapTool.getToolName(), getSeatMapTool.getDisplayName());
+        map.put(lockSeatsTool.getToolName(), lockSeatsTool.getDisplayName());
+        map.put(createOrderTool.getToolName(), createOrderTool.getDisplayName());
+        map.put(payOrderTool.getToolName(), payOrderTool.getDisplayName());
+        map.put(getUserPreferenceTool.getToolName(), getUserPreferenceTool.getDisplayName());
+        return map;
     }
 }
