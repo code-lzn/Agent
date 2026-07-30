@@ -37,8 +37,13 @@ public class DocumentRagService {
 
     @PostConstruct
     public void init() {
-        vectorStore = SimpleVectorStore.builder(embeddingModel).build();
-        loadDocuments();
+        try {
+            vectorStore = SimpleVectorStore.builder(embeddingModel).build();
+            loadDocuments();
+        } catch (Exception e) {
+            log.warn("RAG 初始化失败（可能是 API key 未配置或网络异常），文档检索功能暂不可用: {}", e.getMessage());
+            vectorStore = null;
+        }
     }
 
     /**
@@ -78,6 +83,10 @@ public class DocumentRagService {
      * 语义检索
      */
     public List<Document> search(String query, int topK) {
+        if (vectorStore == null) {
+            log.warn("向量库未初始化，返回空结果");
+            return List.of();
+        }
         return vectorStore.similaritySearch(SearchRequest.builder()
                 .query(query)
                 .topK(topK)

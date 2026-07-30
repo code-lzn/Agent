@@ -35,6 +35,15 @@ spring:
   profiles:
     active: dev
 
+  mail:
+    host: smtp.qq.com
+    port: 587
+    username: ${QQ_MAIL_USERNAME:}
+    password: ${QQ_MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
 logging:
   level:
     org.springframework.ai: debug

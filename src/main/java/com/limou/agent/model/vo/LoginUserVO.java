@@ -47,6 +47,10 @@ public class LoginUserVO implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
+    /**
+     * 是否需要设置密码（密码仍为默认值 12345678）
+     */
+    private Boolean needSetPassword;
 
     private static final long serialVersionUID = 1L;
 }
