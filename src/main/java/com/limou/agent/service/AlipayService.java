@@ -56,14 +56,13 @@ public class AlipayService {
         // 同步跳转地址
         request.setReturnUrl(alipayConfig.getReturnUrl());
 
-        // 构建业务参数
-        String bizContent = "{" +
-                "\"out_trade_no\":\"" + orderNo + "\"," +
-                "\"total_amount\":\"" + totalAmount + "\"," +
-                "\"subject\":\"" + subject + "\"," +
-                "\"product_code\":\"FAST_INSTANT_TRADE_PAY\"" +
-                "}";
-        request.setBizContent(bizContent);
+        // 构建业务参数（使用 hutool JSONObject，自动处理特殊字符转义）
+        cn.hutool.json.JSONObject bizContent = new cn.hutool.json.JSONObject();
+        bizContent.set("out_trade_no", orderNo);
+        bizContent.set("total_amount", totalAmount);
+        bizContent.set("subject", subject);
+        bizContent.set("product_code", "FAST_INSTANT_TRADE_PAY");
+        request.setBizContent(bizContent.toString());
 
         try {
             String form = alipayClient.pageExecute(request).getBody();
