@@ -104,6 +104,14 @@ public class FileController {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件类型错误");
             }
         }
+        if (FileUploadBizEnum.FILM_POSTER.equals(fileUploadBizEnum)) {
+            if (fileSize > 5 * ONE_M) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "海报文件大小不能超过 5M");
+            }
+            if (!Arrays.asList("jpeg", "jpg", "png", "webp").contains(fileSuffix)) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "海报文件类型仅支持 jpeg/jpg/png/webp");
+            }
+        }
     }
 
     /**

@@ -12,7 +12,6 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -143,40 +142,6 @@ public class ConversationState implements Serializable {
         if (!isSlotFilled("price")) missing.add("price");
         if (!isSlotFilled("schedule")) missing.add("schedule");
         return missing;
-    }
-
-    /**
-     * 检查是否可以跳步到指定步骤
-     */
-    public boolean isReadyForStep(String step) {
-        return switch (step) {
-            case "search_movie" -> true; // 总是可以搜索影片
-            case "select_cinema" -> isSlotFilled("film");
-            case "select_showtime" -> isSlotFilled("film") && isSlotFilled("cinema");
-            case "select_seat" -> isSlotFilled("film") && isSlotFilled("cinema") && isSlotFilled("schedule");
-            case "confirm_order" -> isSlotFilled("film") && isSlotFilled("cinema")
-                    && isSlotFilled("schedule") && isSlotFilled("seats");
-            default -> false;
-        };
-    }
-
-    /**
-     * 检查是否所有必要槽位已填充（可以直通下单）
-     */
-    public boolean isAllSlotsFilled() {
-        return isSlotFilled("film") && isSlotFilled("cinema")
-                && isSlotFilled("schedule") && isSlotFilled("seats")
-                && isSlotFilled("count");
-    }
-
-    /**
-     * 标记步骤完成
-     */
-    public void markStepComplete(String step) {
-        if (!completedSteps.contains(step)) {
-            completedSteps.add(step);
-        }
-        this.lastUpdate = LocalDateTime.now();
     }
 
     /**

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.FilmMapper;
 import com.limou.agent.model.entity.Film;
+import com.limou.agent.model.enums.FilmStatusEnum;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -39,7 +40,7 @@ public class SearchFilmsTool extends BaseTool {
     ) {
         try {
             QueryWrapper wrapper = QueryWrapper.create()
-                    .eq(Film::getStatus, "published");
+                    .eq(Film::getStatus, FilmStatusEnum.PUBLISHED.getValue());
 
             // 关键词搜索：按名称模糊匹配
             if (keyword != null && !keyword.isBlank()) {

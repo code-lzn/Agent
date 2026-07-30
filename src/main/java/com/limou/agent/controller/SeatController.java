@@ -2,6 +2,8 @@ package com.limou.agent.controller;
 
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
+import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.model.vo.SeatMapVO;
 import com.mybatisflex.core.paginate.Page;
 import org.springframework.web.bind.annotation.*;
@@ -38,10 +40,9 @@ public class SeatController {
 
     @PostMapping("save")
     public BaseResponse<Long> save(@RequestBody Seat seat) {
+        ThrowUtils.throwIf(seat == null, ErrorCode.PARAMS_ERROR);
         boolean result = seatService.save(seat);
-        if (!result) {
-            return new BaseResponse<>(50001, null, "保存失败");
-        }
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(seat.getId());
     }
 

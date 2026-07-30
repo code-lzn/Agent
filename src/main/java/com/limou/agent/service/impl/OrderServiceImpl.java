@@ -127,6 +127,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         // 3. 计算总价
         int count = seats.size();
+        if (schedule.getPrice() == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "场次票价未设置");
+        }
         BigDecimal totalPrice;
         boolean hasVip = seats.stream().anyMatch(s -> "vip".equals(s.getZone()));
         if (hasVip && schedule.getVipPrice() != null) {
@@ -218,7 +221,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
         }
-        if (!order.getUserId().equals(userId)) {
+        if (userId != null && !order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权查看此订单");
         }
 
@@ -292,6 +295,43 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         log.info("定时任务：取消 {} 个超时订单，释放 {} 个座位", timeoutOrders.size(),
                 timeoutOrders.stream().mapToLong(o -> o.getCount()).sum());
         return timeoutOrders.size();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelOrder(Long orderId, String reason) {
+        if (orderId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "订单ID不能为空");
+        }
+
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        }
+        if ("cancelled".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已取消，无需重复操作");
+        }
+        if ("completed".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "已完成订单无法取消");
+        }
+
+        // 取消订单
+        order.setStatus("cancelled");
+        order.setCancelReason(reason);
+        this.updateById(order);
+
+        // 释放关联座位
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", orderId);
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
+        if (CollUtil.isNotEmpty(seatIds)) {
+            List<Seat> seats = seatService.listByIds(seatIds);
+            seats.forEach(s -> s.setStatus("available"));
+            seatService.updateBatch(seats);
+        }
+
+        log.info("管理员取消订单 {}（{}），释放 {} 个座位", order.getOrderNo(), reason,
+                orderSeats.size());
     }
 
     @Override

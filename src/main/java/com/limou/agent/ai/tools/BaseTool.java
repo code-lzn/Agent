@@ -1,7 +1,6 @@
 package com.limou.agent.ai.tools;
 
 import cn.hutool.json.JSONObject;
-import org.springframework.ai.tool.ToolCallback;
 
 /**
  * 工具基类
@@ -22,15 +21,6 @@ public abstract class BaseTool{
      * @return 工具中文名称
      */
     public abstract String getDisplayName();
-
-    /**
-     * 生成工具请求时的返回值（显示给用户）
-     *
-     * @return 工具请求显示内容
-     */
-    public String generateToolRequestResponse() {
-        return String.format("\n\n[选择工具] %s\n\n", getDisplayName());
-    }
 
     /**
      * 生成工具执行结果格式（保存到数据库）

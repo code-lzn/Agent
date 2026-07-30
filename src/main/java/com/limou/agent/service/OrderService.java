@@ -68,6 +68,14 @@ public interface OrderService extends IService<Order> {
     int cancelTimeoutOrders();
 
     /**
+     * 取消指定订单（管理员取消/退款），释放座位。
+     *
+     * @param orderId 订单ID
+     * @param reason  取消原因（timeout / user_cancelled）
+     */
+    void cancelOrder(Long orderId, String reason);
+
+    /**
      * 释放已锁定的座位（无关联订单的锁定座位）。
      */
     int releaseOrphanLocks();
