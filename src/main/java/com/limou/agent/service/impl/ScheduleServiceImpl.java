@@ -160,18 +160,54 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
         }
 
-        // 3. 批量初始化座位
+        // 3. 解析 seatTemplate 获取 VIP 行配置和行列覆盖
+        Set<Integer> vipRows = new HashSet<>();
+        Set<String> vipCells = new HashSet<>();
+        Map<Integer, Integer> rowOverrides = new HashMap<>();
+        if (cn.hutool.core.util.StrUtil.isNotBlank(hall.getSeatTemplate())) {
+            try {
+                cn.hutool.json.JSONObject tmpl = new cn.hutool.json.JSONObject(hall.getSeatTemplate());
+                if (tmpl.containsKey("vipRows")) {
+                    for (Object r : tmpl.getJSONArray("vipRows")) {
+                        vipRows.add((Integer) r);
+                    }
+                }
+                if (tmpl.containsKey("vipCells")) {
+                    for (Object c : tmpl.getJSONArray("vipCells")) {
+                        vipCells.add((String) c);
+                    }
+                }
+                if (tmpl.containsKey("rowOverrides")) {
+                    cn.hutool.json.JSONObject overrides = tmpl.getJSONObject("rowOverrides");
+                    for (Map.Entry<String, Object> entry : overrides.entrySet()) {
+                        try {
+                            int r = Integer.parseInt(entry.getKey());
+                            int c = ((Number) entry.getValue()).intValue();
+                            rowOverrides.put(r, c);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        // 4. 批量初始化座位（支持逐行自定义列数）
         List<Seat> seats = new ArrayList<>();
         for (int row = 1; row <= hall.getRowCount(); row++) {
-            for (int col = 1; col <= hall.getColCount(); col++) {
+            int rowCols = rowOverrides.getOrDefault(row, hall.getColCount());
+            for (int col = 1; col <= rowCols; col++) {
                 Seat seat = new Seat();
                 seat.setScheduleId(schedule.getId());
                 seat.setHallId(hall.getId());
                 seat.setRowNum(row);
                 seat.setColNum(col);
                 seat.setSeatLabel(row + "排" + col + "座");
-                // 根据 hall 模板判断区域（可扩展 seatTemplate JSON）
-                seat.setZone("regular");
+
+                // 判断是否为 VIP 区
+                boolean isVip = vipRows.contains(row) || vipCells.contains(row + "," + col);
+                seat.setZone(isVip ? "vip" : "regular");
+
                 seat.setStatus("available");
                 seats.add(seat);
             }

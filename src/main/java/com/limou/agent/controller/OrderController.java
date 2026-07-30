@@ -104,24 +104,48 @@ public class OrderController {
      * 后台 - 订单列表（所有订单）。
      */
     @GetMapping("/admin/list")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<Order>> adminList(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String orderNo,
+            @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) String filmName,
+            @RequestParam(required = false) String cinemaName,
+            @RequestParam(required = false) String hallName) {
         QueryWrapper qw = QueryWrapper.create()
+                .like("orderNo", orderNo, cn.hutool.core.util.StrUtil.isNotBlank(orderNo))
                 .eq("status", status, status != null)
+                .eq("userId", userId, userId != null)
+                .like("filmName", filmName, cn.hutool.core.util.StrUtil.isNotBlank(filmName))
+                .like("cinemaName", cinemaName, cn.hutool.core.util.StrUtil.isNotBlank(cinemaName))
+                .like("hallName", hallName, cn.hutool.core.util.StrUtil.isNotBlank(hallName))
                 .orderBy("createTime", false);
         Page<Order> orderPage = orderService.page(Page.of(pageNum, pageSize), qw);
         return ResultUtils.success(orderPage);
     }
 
     /**
+     * 后台 - 订单详情（含座位号），不校验用户ID。
+     */
+    @GetMapping("/admin/detail/{id}")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<OrderVO> adminDetail(@PathVariable Long id) {
+        OrderVO vo = orderService.getOrderDetail(id, null);
+        return ResultUtils.success(vo);
+    }
+
+    /**
      * 后台 - 取消/退款订单。
+     * <p>
+     * 对 pending 订单：取消并释放座位。
+     * 对 paid 订单：取消并释放座位（退款需在支付宝沙箱手动操作）。
      */
     @PostMapping("/admin/cancel/{id}")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> adminCancel(@PathVariable Long id) {
-        orderService.cancelTimeoutOrders(); // 复用取消逻辑
+        orderService.cancelOrder(id, "user_cancelled");
         return ResultUtils.success(true);
     }
 }
