@@ -1,13 +1,10 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.common.BaseResponse;
+import com.limou.agent.common.ResultUtils;
+import com.limou.agent.model.vo.SeatMapVO;
 import com.mybatisflex.core.paginate.Page;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.limou.agent.model.entity.Seat;
 import com.limou.agent.service.SeatService;
@@ -15,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- *  控制层。
+ * 座位 控制层。
  *
  * @author 李振南
  */
@@ -26,69 +23,52 @@ public class SeatController {
     @Autowired
     private SeatService seatService;
 
+    // ========== 前台接口 ==========
+
     /**
-     * 保存。
-     *
-     * @param seat 
-     * @return {@code true} 保存成功，{@code false} 保存失败
+     * 获取场次座位图。
      */
+    @GetMapping("/seatmap/{scheduleId}")
+    public BaseResponse<SeatMapVO> getSeatMap(@PathVariable Long scheduleId) {
+        SeatMapVO seatMap = seatService.getSeatMap(scheduleId);
+        return ResultUtils.success(seatMap);
+    }
+
+    // ========== 后台管理接口 ==========
+
     @PostMapping("save")
-    public boolean save(@RequestBody Seat seat) {
-        return seatService.save(seat);
+    public BaseResponse<Long> save(@RequestBody Seat seat) {
+        boolean result = seatService.save(seat);
+        if (!result) {
+            return new BaseResponse<>(50001, null, "保存失败");
+        }
+        return ResultUtils.success(seat.getId());
     }
 
-    /**
-     * 根据主键删除。
-     *
-     * @param id 主键
-     * @return {@code true} 删除成功，{@code false} 删除失败
-     */
     @DeleteMapping("remove/{id}")
-    public boolean remove(@PathVariable Long id) {
-        return seatService.removeById(id);
+    public BaseResponse<Boolean> remove(@PathVariable Long id) {
+        return ResultUtils.success(seatService.removeById(id));
     }
 
-    /**
-     * 根据主键更新。
-     *
-     * @param seat 
-     * @return {@code true} 更新成功，{@code false} 更新失败
-     */
     @PutMapping("update")
-    public boolean update(@RequestBody Seat seat) {
-        return seatService.updateById(seat);
+    public BaseResponse<Boolean> update(@RequestBody Seat seat) {
+        boolean result = seatService.updateById(seat);
+        return ResultUtils.success(result);
     }
 
-    /**
-     * 查询所有。
-     *
-     * @return 所有数据
-     */
-    @GetMapping("list")
-    public List<Seat> list() {
-        return seatService.list();
+    @GetMapping("listAll")
+    public BaseResponse<List<Seat>> listAll() {
+        return ResultUtils.success(seatService.list());
     }
 
-    /**
-     * 根据主键获取。
-     *
-     * @param id 主键
-     * @return 详情
-     */
     @GetMapping("getInfo/{id}")
-    public Seat getInfo(@PathVariable Long id) {
-        return seatService.getById(id);
+    public BaseResponse<Seat> getInfo(@PathVariable Long id) {
+        return ResultUtils.success(seatService.getById(id));
     }
 
-    /**
-     * 分页查询。
-     *
-     * @param page 分页对象
-     * @return 分页对象
-     */
-    @GetMapping("page")
-    public Page<Seat> page(Page<Seat> page) {
-        return seatService.page(page);
+    @PostMapping("page")
+    public BaseResponse<Page<Seat>> page(@RequestBody Page<Seat> page) {
+        return ResultUtils.success(seatService.page(page));
     }
 
 }

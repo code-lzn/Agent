@@ -7,7 +7,6 @@ import com.mybatisflex.annotation.Table;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.sql.Date;
-import java.sql.Time;
 import java.time.LocalDateTime;
 
 import java.io.Serial;
@@ -66,13 +65,13 @@ public class Schedule implements Serializable {
      * 开场时间
      */
     @Column("startTime")
-    private Time startTime;
+    private String startTime;
 
     /**
      * 散场时间（自动计算: startTime + 片长 + 15min）
      */
     @Column("endTime")
-    private Time endTime;
+    private String endTime;
 
     /**
      * 标准票价（元）
