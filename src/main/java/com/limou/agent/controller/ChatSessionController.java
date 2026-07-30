@@ -1,5 +1,7 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.common.BaseResponse;
+import com.limou.agent.common.ResultUtils;
 import com.mybatisflex.core.paginate.Page;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,12 +31,12 @@ public class ChatSessionController {
     /**
      * 保存。
      *
-     * @param chatSession 
+     * @param chatSession
      * @return {@code true} 保存成功，{@code false} 保存失败
      */
     @PostMapping("save")
-    public boolean save(@RequestBody ChatSession chatSession) {
-        return chatSessionService.save(chatSession);
+    public BaseResponse<Boolean> save(@RequestBody ChatSession chatSession) {
+        return ResultUtils.success(chatSessionService.save(chatSession));
     }
 
     /**
@@ -44,19 +46,19 @@ public class ChatSessionController {
      * @return {@code true} 删除成功，{@code false} 删除失败
      */
     @DeleteMapping("remove/{id}")
-    public boolean remove(@PathVariable Long id) {
-        return chatSessionService.removeById(id);
+    public BaseResponse<Boolean> remove(@PathVariable Long id) {
+        return ResultUtils.success(chatSessionService.removeById(id));
     }
 
     /**
      * 根据主键更新。
      *
-     * @param chatSession 
+     * @param chatSession
      * @return {@code true} 更新成功，{@code false} 更新失败
      */
     @PutMapping("update")
-    public boolean update(@RequestBody ChatSession chatSession) {
-        return chatSessionService.updateById(chatSession);
+    public BaseResponse<Boolean> update(@RequestBody ChatSession chatSession) {
+        return ResultUtils.success(chatSessionService.updateById(chatSession));
     }
 
     /**

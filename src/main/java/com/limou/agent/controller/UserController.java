@@ -9,10 +9,7 @@ import com.limou.agent.constant.UserConstant;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
-import com.limou.agent.model.dto.user.UserAddRequest;
-import com.limou.agent.model.dto.user.UserQueryRequest;
-import com.limou.agent.model.dto.user.UserRegisterRequest;
-import com.limou.agent.model.dto.user.UserUpdateRequest;
+import com.limou.agent.model.dto.user.*;
 import com.limou.agent.model.vo.LoginUserVO;
 import com.limou.agent.model.vo.UserVO;
 import com.mybatisflex.core.paginate.Page;
@@ -81,10 +78,21 @@ public class UserController {
         return ResultUtils.success(userService.getLoginUserVO(loginUser));
     }
 
-
-    public BaseResponse<Boolean> userLogout(HttpServletRequest request) {
-        boolean logout = userService.userLogout(request);
-        return ResultUtils.success(logout);
+    /**
+     * 当前用户修改自己的个人信息（昵称 / 头像 / 简介）。
+     * 无需管理员权限，登录即可。
+     */
+    @PostMapping("/update/my")
+    public BaseResponse<LoginUserVO> updateMyProfile(@RequestBody UserUpdateRequest updateRequest,
+                                                      HttpServletRequest request) {
+        ThrowUtils.throwIf(updateRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        // 只允许修改昵称、头像、简介
+        if (updateRequest.getUserName() != null) loginUser.setUserName(updateRequest.getUserName());
+        if (updateRequest.getUserAvatar() != null) loginUser.setUserAvatar(updateRequest.getUserAvatar());
+        if (updateRequest.getUserProfile() != null) loginUser.setUserProfile(updateRequest.getUserProfile());
+        userService.updateById(loginUser);
+        return ResultUtils.success(userService.getLoginUserVO(loginUser));
     }
 
     /**
@@ -121,9 +129,11 @@ public class UserController {
      * 根据 id 获取包装类
      */
     @GetMapping("/get/vo")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<UserVO> getUserVOById(long id) {
-        BaseResponse<User> response = getUserById(id);
-        User user = response.getData();
+        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+        User user = userService.getById(id);
+        ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR);
         return ResultUtils.success(userService.getUserVO(user));
     }
 
@@ -176,6 +186,67 @@ public class UserController {
         return ResultUtils.success(userVOPage);
     }
 
+    /**
+     * 发送邮箱验证码
+     */
+    @PostMapping("/send-mail-code")
+    public BaseResponse<String> sendMailCode(@RequestBody SendMailCodeRequest req) {
+        ThrowUtils.throwIf(req == null, ErrorCode.PARAMS_ERROR);
+        userService.sendMailCode(req.getEmail());
+        return ResultUtils.success("验证码已发送");
+    }
+    /**
+     * 邮箱验证码登录 / 自动注册
+     */
+    @PostMapping("/login-by-mail")
+    public BaseResponse<LoginUserVO> mailLogin(@RequestBody MailLoginRequest req,
+                                               HttpServletRequest request) {
+        ThrowUtils.throwIf(req == null, ErrorCode.PARAMS_ERROR);
+        return ResultUtils.success(userService.mailLogin(req.getEmail(), req.getCode(), request));
+    }
+    /**
+     * 通过邮箱验证码重置密码
+     */
+    @PostMapping("/reset-password")
+    public BaseResponse<String> resetPassword(@RequestBody ResetPasswordRequest req) {
+        ThrowUtils.throwIf(req == null, ErrorCode.PARAMS_ERROR);
+        userService.resetPassword(req.getEmail(), req.getCode(),
+                req.getNewPassword(), req.getCheckPassword());
+        return ResultUtils.success("密码重置成功");
+    }
 
+    /**
+     * 设置登录密码（当前密码为默认值时使用，无需旧密码）
+     */
+    @PostMapping("/set-password")
+    public BaseResponse<String> setPassword(@RequestBody SetPasswordRequest req,
+                                             HttpServletRequest request) {
+        ThrowUtils.throwIf(req == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        userService.setPassword(loginUser.getId(), req.getNewPassword(), req.getCheckPassword());
+        return ResultUtils.success("密码设置成功");
+    }
+
+    /**
+     * 修改登录密码（需校验旧密码）
+     */
+    @PostMapping("/change-password")
+    public BaseResponse<String> changePassword(@RequestBody ChangePasswordRequest req,
+                                                HttpServletRequest request) {
+        ThrowUtils.throwIf(req == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        userService.changePassword(loginUser.getId(),
+                req.getOldPassword(), req.getNewPassword(), req.getCheckPassword());
+        return ResultUtils.success("密码修改成功");
+    }
+
+    /**
+     * 退出登录
+     */
+    @PostMapping("/logout")
+    public BaseResponse<Boolean> userLogout(HttpServletRequest request) {
+        boolean logout = userService.userLogout(request);
+        return ResultUtils.success(logout);
+    }
 
 }

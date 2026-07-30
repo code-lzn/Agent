@@ -16,4 +16,8 @@ public interface UserConstant {
      */
     String ADMIN_ROLE="admin";
     //endregion
+    /**
+     * 邮箱验证码 Redis Key 前缀
+     */
+    String MAIL_CODE_PREFIX = "mail_code:";
 }

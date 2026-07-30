@@ -1,0 +1,43 @@
+package com.limou.agent.model.vo;
+
+import lombok.Data;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Date;
+import java.util.List;
+
+/**
+ * 订单视图对象。
+ *
+ * @author 李振南
+ */
+@Data
+public class OrderVO implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    private Long id;
+    private String orderNo;
+    private Long userId;
+    private Long scheduleId;
+    private String filmName;
+    private String cinemaName;
+    private String scheduleTime;
+    private String hallName;
+    private BigDecimal totalPrice;
+    private Integer count;
+    private String status;
+    private String cancelReason;
+    private Date paidAt;
+    private Date expireAt;
+    private Date createTime;
+
+    /**
+     * 座位标签列表（如：["5排6座", "5排7座"]）
+     */
+    private List<String> seatLabels;
+}

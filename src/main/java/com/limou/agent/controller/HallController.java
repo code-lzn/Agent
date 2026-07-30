@@ -1,6 +1,9 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.common.BaseResponse;
+import com.limou.agent.common.ResultUtils;
 import com.mybatisflex.core.paginate.Page;
+import com.mybatisflex.core.query.QueryWrapper;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,12 +32,12 @@ public class HallController {
     /**
      * 保存。
      *
-     * @param hall 
+     * @param hall
      * @return {@code true} 保存成功，{@code false} 保存失败
      */
     @PostMapping("save")
-    public boolean save(@RequestBody Hall hall) {
-        return hallService.save(hall);
+    public BaseResponse<Boolean> save(@RequestBody Hall hall) {
+        return ResultUtils.success(hallService.save(hall));
     }
 
     /**
@@ -44,19 +47,19 @@ public class HallController {
      * @return {@code true} 删除成功，{@code false} 删除失败
      */
     @DeleteMapping("remove/{id}")
-    public boolean remove(@PathVariable Long id) {
-        return hallService.removeById(id);
+    public BaseResponse<Boolean> remove(@PathVariable Long id) {
+        return ResultUtils.success(hallService.removeById(id));
     }
 
     /**
      * 根据主键更新。
      *
-     * @param hall 
+     * @param hall
      * @return {@code true} 更新成功，{@code false} 更新失败
      */
     @PutMapping("update")
-    public boolean update(@RequestBody Hall hall) {
-        return hallService.updateById(hall);
+    public BaseResponse<Boolean> update(@RequestBody Hall hall) {
+        return ResultUtils.success(hallService.updateById(hall));
     }
 
     /**
@@ -65,8 +68,8 @@ public class HallController {
      * @return 所有数据
      */
     @GetMapping("list")
-    public List<Hall> list() {
-        return hallService.list();
+    public BaseResponse<List<Hall>> list() {
+        return ResultUtils.success(hallService.list());
     }
 
     /**
@@ -76,8 +79,8 @@ public class HallController {
      * @return 详情
      */
     @GetMapping("getInfo/{id}")
-    public Hall getInfo(@PathVariable Long id) {
-        return hallService.getById(id);
+    public BaseResponse<Hall> getInfo(@PathVariable Long id) {
+        return ResultUtils.success(hallService.getById(id));
     }
 
     /**
@@ -87,8 +90,18 @@ public class HallController {
      * @return 分页对象
      */
     @GetMapping("page")
-    public Page<Hall> page(Page<Hall> page) {
-        return hallService.page(page);
+    public BaseResponse<Page<Hall>> page(Page<Hall> page) {
+        return ResultUtils.success(hallService.page(page));
+    }
+
+    /**
+     * 根据影院ID获取影厅列表。
+     */
+    @GetMapping("/listByCinema/{cinemaId}")
+    public BaseResponse<List<Hall>> listByCinema(@PathVariable Long cinemaId) {
+        QueryWrapper qw = QueryWrapper.create().eq("cinemaId", cinemaId);
+        List<Hall> list = hallService.list(qw);
+        return ResultUtils.success(list);
     }
 
 }

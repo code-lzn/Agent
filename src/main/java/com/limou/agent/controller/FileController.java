@@ -104,5 +104,49 @@ public class FileController {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件类型错误");
             }
         }
+        if (FileUploadBizEnum.FILM_POSTER.equals(fileUploadBizEnum)) {
+            if (fileSize > 5 * ONE_M) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "海报文件大小不能超过 5M");
+            }
+            if (!Arrays.asList("jpeg", "jpg", "png", "webp").contains(fileSuffix)) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "海报文件类型仅支持 jpeg/jpg/png/webp");
+            }
+        }
+    }
+
+    /**
+     * 头像上传（本地存储，无需 COS）
+     */
+    @PostMapping("/upload/avatar")
+    public BaseResponse<String> uploadAvatar(@RequestPart("file") MultipartFile multipartFile,
+                                              HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        // 文件大小 ≤ 2MB
+        long fileSize = multipartFile.getSize();
+        if (fileSize > 2 * 1024 * 1024L) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "头像大小不能超过 2MB");
+        }
+        // 文件后缀
+        String suffix = FileUtil.getSuffix(multipartFile.getOriginalFilename());
+        if (!Arrays.asList("jpeg", "jpg", "png", "webp", "gif").contains(suffix)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "仅支持 jpg/png/webp/gif 格式");
+        }
+        // 保存到项目根目录下的 uploads/avatars
+        String projectDir = System.getProperty("user.dir");
+        File dir = new File(projectDir, "uploads/avatars");
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        String filename = loginUser.getId() + "_" + System.currentTimeMillis() + "." + suffix;
+        File dest = new File(dir, filename);
+        try {
+            multipartFile.transferTo(dest);
+        } catch (Exception e) {
+            log.error("avatar upload error", e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
+        }
+        // 返回可访问的路径
+        String url = "/uploads/avatars/" + filename;
+        return ResultUtils.success(url);
     }
 }

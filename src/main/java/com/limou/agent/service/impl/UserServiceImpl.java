@@ -15,12 +15,18 @@ import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.limou.agent.model.entity.User;
 import com.limou.agent.mapper.UserMapper;
 import com.limou.agent.service.UserService;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
@@ -31,6 +37,12 @@ import java.util.stream.Collectors;
  */
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private JavaMailSender mailSender;
 
     @Override
     public Long register(String userAccount, String userPassword, String checkPassword) {
@@ -83,7 +95,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (user == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
-        return BeanUtil.copyProperties(user, LoginUserVO.class);
+        LoginUserVO vo = BeanUtil.copyProperties(user, LoginUserVO.class);
+        // 密码为默认密码 12345678 时需要引导设置
+        vo.setNeedSetPassword(
+                encryptPassword("12345678").equals(user.getUserPassword())
+        );
+        return vo;
+
 
     }
 
@@ -179,5 +197,141 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
 
+
+    // ==================== sendMailCode ====================
+    @Override
+    public void sendMailCode(String email) {
+        if (StrUtil.isBlank(email) || !email.contains("@")) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
+        }
+        // 60 秒内不允许重发
+        String lastKey = UserConstant.MAIL_CODE_PREFIX + "last:" + email;
+        String lastTime = stringRedisTemplate.opsForValue().get(lastKey);
+        if (lastTime != null) {
+            throw new BusinessException(ErrorCode.TOO_MANY_REQUEST, "请60秒后再试");
+        }
+        String code = String.valueOf(ThreadLocalRandom.current().nextInt(100000, 999999));
+        String codeKey = UserConstant.MAIL_CODE_PREFIX + email;
+        stringRedisTemplate.opsForValue().set(codeKey, code, 5, TimeUnit.MINUTES);
+        stringRedisTemplate.opsForValue().set(lastKey, "1", 59, TimeUnit.SECONDS);
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setFrom("2215895433@qq.com");
+        msg.setTo(email);
+        msg.setSubject("妙语购票 - 邮箱验证码");
+        msg.setText("您的验证码是：" + code + "，5分钟内有效。\n\n如非本人操作，请忽略此邮件。");
+        try {
+            mailSender.send(msg);
+        } catch (Exception e) {
+            // 验证码已存入 Redis，发送失败时需要删除避免泄漏
+            stringRedisTemplate.delete(codeKey);
+            stringRedisTemplate.delete(lastKey);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "邮件发送失败：" + e.getMessage());
+        }
+    }
+    // ==================== mailLogin ====================
+    @Override
+    public LoginUserVO mailLogin(String email, String code, HttpServletRequest request) {
+        if (StrUtil.isBlank(email) || StrUtil.isBlank(code)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
+        }
+        if (!email.contains("@")) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
+        }
+        String codeKey = UserConstant.MAIL_CODE_PREFIX + email;
+        String savedCode = stringRedisTemplate.opsForValue().get(codeKey);
+        if (savedCode == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "验证码已过期，请重新获取");
+        }
+        if (!savedCode.equals(code)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "验证码错误");
+        }
+        stringRedisTemplate.delete(codeKey);
+        // ★ 按 userAccount 查（userAccount 就是邮箱）
+        User user = this.mapper.selectOneByQuery(
+                new QueryWrapper().eq(User::getUserAccount, email));
+        if (user == null) {
+            // 自动注册
+            user = new User();
+            user.setUserAccount(email);                          // ★ userAccount = 邮箱
+            user.setUserName(email.split("@")[0]);               // 默认昵称：@前面部分
+            user.setUserPassword(encryptPassword("12345678"));
+            user.setUserRole(UserRoleEnum.USER.getValue());
+            save(user);
+        }
+        request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
+        return this.getLoginUserVO(user);
+    }
+    // ==================== resetPassword ====================
+    @Override
+    public void resetPassword(String email, String code, String newPassword, String checkPassword) {
+        if (StrUtil.hasBlank(email, code, newPassword, checkPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
+        }
+        if (newPassword.length() < 8) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码至少8位");
+        }
+        if (!newPassword.equals(checkPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "两次密码不一致");
+        }
+        String codeKey = UserConstant.MAIL_CODE_PREFIX + email;
+        String savedCode = stringRedisTemplate.opsForValue().get(codeKey);
+        if (savedCode == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "验证码已过期");
+        }
+        if (!savedCode.equals(code)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "验证码错误");
+        }
+        stringRedisTemplate.delete(codeKey);
+        // ★ 按 userAccount 查
+        User user = this.mapper.selectOneByQuery(
+                new QueryWrapper().eq(User::getUserAccount, email));
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "该邮箱未注册，请先用邮箱验证码登录");
+        }
+        user.setUserPassword(encryptPassword(newPassword));
+        updateById(user);
+    }
+
+    // ==================== setPassword ====================
+    @Override
+    public void setPassword(Long userId, String newPassword, String checkPassword) {
+        if (StrUtil.hasBlank(newPassword, checkPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
+        }
+        if (newPassword.length() < 8) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码至少8位");
+        }
+        if (!newPassword.equals(checkPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "两次密码不一致");
+        }
+        User user = this.getById(userId);
+        if (user == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        if (!encryptPassword("12345678").equals(user.getUserPassword())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码已设置过，请使用修改密码功能");
+        }
+        user.setUserPassword(encryptPassword(newPassword));
+        updateById(user);
+    }
+
+    // ==================== changePassword ====================
+    @Override
+    public void changePassword(Long userId, String oldPassword, String newPassword, String checkPassword) {
+        if (StrUtil.hasBlank(oldPassword, newPassword, checkPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
+        }
+        if (newPassword.length() < 8) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码至少8位");
+        }
+        if (!newPassword.equals(checkPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "两次密码不一致");
+        }
+        User user = this.getById(userId);
+        if (user == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR);
+        if (!encryptPassword(oldPassword).equals(user.getUserPassword())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "旧密码不正确");
+        }
+        user.setUserPassword(encryptPassword(newPassword));
+        updateById(user);
+    }
 
 }
