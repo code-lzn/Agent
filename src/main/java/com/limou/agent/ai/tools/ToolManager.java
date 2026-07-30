@@ -22,6 +22,7 @@ public class ToolManager {
     private static final Map<String, BaseTool> toolMap = new HashMap<>();
 
     @Resource
+    @Qualifier("mcpToolCallbacks")
     private ToolCallbackProvider mcpToolCallbackProvider;
 
 

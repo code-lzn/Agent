@@ -1,6 +1,7 @@
 package com.limou.agent.rag;
 
 import jakarta.annotation.PostConstruct;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -20,6 +21,7 @@ import java.util.List;
 
 @Slf4j
 @Service
+@Getter
 public class DocumentRagService {
 
     /**
@@ -92,4 +94,5 @@ public class DocumentRagService {
                 .topK(topK)
                 .build());
     }
+
 }

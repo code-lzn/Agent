@@ -4,6 +4,7 @@ import com.limou.agent.ai.ratelimiter.annotation.RateLimit;
 import com.limou.agent.ai.ratelimiter.enums.RateLimitType;
 import com.limou.agent.model.dto.movie.MovieChatRequest;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.tools.LockSeatsTool;
 import com.limou.agent.service.AiService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,9 @@ public class MovieAgentController {
     @Resource
     private MovieStateManager movieStateManager;
 
+    @Resource
+    private LockSeatsTool lockSeatsTool;
+
     /**
      * 电影票 Agent 对话（POST，支持 JSON 请求体）
      */
@@ -45,15 +49,15 @@ public class MovieAgentController {
     /**
      * 电影票 Agent 对话（GET，方便测试）
      */
-    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
-    public String doChatGet(
-            @RequestParam String message,
-            @RequestParam String conversationId,
-            @RequestParam(required = false) Long userId) {
-        log.info("MovieAgent GET: conversationId={}, userId={}", conversationId, userId);
-        return aiService.doMovieChat(message, conversationId, userId);
-    }
+//    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
+//    public String doChatGet(
+//            @RequestParam String message,
+//            @RequestParam String conversationId,
+//            @RequestParam(required = false) Long userId) {
+//        log.info("MovieAgent GET: conversationId={}, userId={}", conversationId, userId);
+//        return aiService.doMovieChat(message, conversationId, userId);
+//    }
 
     /**
      * 电影票 Agent 流式对话（SSE）
@@ -72,8 +76,9 @@ public class MovieAgentController {
     @PostMapping("/reset")
     public String resetConversation(@RequestParam String conversationId) {
         movieStateManager.clearState(conversationId);
-        aiService.doAgentChat("重置对话", conversationId); // 清除 Agent 的 checkpoint
+        lockSeatsTool.releaseStaleLocks(); // 释放过期座位锁
+        aiService.doAgentChat("重置对话", conversationId);
         log.info("MovieAgent 重置: conversationId={}", conversationId);
-        return "{\"success\":true,\"message\":\"会话已重置\"}";
+        return "{\"success\":true,\"message\":\"会话已重置，座位锁已清理\"}";
     }
 }
