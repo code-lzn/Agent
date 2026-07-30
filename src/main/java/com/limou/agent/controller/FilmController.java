@@ -28,15 +28,11 @@ public class FilmController {
 
     // ========== 前台接口 ==========
 
-    /**
-     * 影片列表（筛选 + 排序 + 分页，仅返回已发布影片）。
+    /** 影片列表（筛选 + 排序 + 分页）。
+     * 前端传 status=hot 取热映，status=upcoming 取即将上映
      */
     @GetMapping("/list")
     public BaseResponse<Page<Film>> listFilm(FilmQueryRequest filmQueryRequest) {
-        // 前台只查已发布的
-        if (filmQueryRequest.getStatus() == null) {
-            filmQueryRequest.setStatus("published");
-        }
         Page<Film> filmPage = filmService.queryFilmPage(filmQueryRequest);
         return ResultUtils.success(filmPage);
     }
