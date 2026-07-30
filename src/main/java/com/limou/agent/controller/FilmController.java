@@ -1,13 +1,13 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.common.BaseResponse;
+import com.limou.agent.common.ResultUtils;
+import com.limou.agent.exception.BusinessException;
+import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.exception.ThrowUtils;
+import com.limou.agent.model.dto.film.FilmQueryRequest;
 import com.mybatisflex.core.paginate.Page;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.limou.agent.model.entity.Film;
 import com.limou.agent.service.FilmService;
@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- *  控制层。
+ * 影片 控制层。
  *
  * @author 李振南
  */
@@ -26,69 +26,103 @@ public class FilmController {
     @Autowired
     private FilmService filmService;
 
+    // ========== 前台接口 ==========
+
+    /**
+     * 影片列表（筛选 + 排序 + 分页，仅返回已发布影片）。
+     */
+    @GetMapping("/list")
+    public BaseResponse<Page<Film>> listFilm(FilmQueryRequest filmQueryRequest) {
+        // 前台只查已发布的
+        if (filmQueryRequest.getStatus() == null) {
+            filmQueryRequest.setStatus("published");
+        }
+        Page<Film> filmPage = filmService.queryFilmPage(filmQueryRequest);
+        return ResultUtils.success(filmPage);
+    }
+
+    /**
+     * 影片详情。
+     *
+     * @param id 影片ID
+     * @return 影片信息
+     */
+    @GetMapping("/{id}")
+    public BaseResponse<Film> getFilm(@PathVariable Long id) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
+        Film film = filmService.getById(id);
+        ThrowUtils.throwIf(film == null, ErrorCode.NOT_FOUND_ERROR, "影片不存在");
+        return ResultUtils.success(film);
+    }
+
+    // ========== 后台管理接口 ==========
+
     /**
      * 保存。
-     *
-     * @param film 
-     * @return {@code true} 保存成功，{@code false} 保存失败
      */
     @PostMapping("save")
-    public boolean save(@RequestBody Film film) {
-        return filmService.save(film);
+    public BaseResponse<Long> save(@RequestBody Film film) {
+        boolean result = filmService.save(film);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(film.getId());
     }
 
     /**
      * 根据主键删除。
-     *
-     * @param id 主键
-     * @return {@code true} 删除成功，{@code false} 删除失败
      */
     @DeleteMapping("remove/{id}")
-    public boolean remove(@PathVariable Long id) {
-        return filmService.removeById(id);
+    public BaseResponse<Boolean> remove(@PathVariable Long id) {
+        boolean result = filmService.removeById(id);
+        return ResultUtils.success(result);
     }
 
     /**
      * 根据主键更新。
-     *
-     * @param film 
-     * @return {@code true} 更新成功，{@code false} 更新失败
      */
     @PutMapping("update")
-    public boolean update(@RequestBody Film film) {
-        return filmService.updateById(film);
+    public BaseResponse<Boolean> update(@RequestBody Film film) {
+        boolean result = filmService.updateById(film);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
     }
 
     /**
      * 查询所有。
-     *
-     * @return 所有数据
      */
-    @GetMapping("list")
-    public List<Film> list() {
-        return filmService.list();
+    @GetMapping("listAll")
+    public BaseResponse<List<Film>> listAll() {
+        List<Film> list = filmService.list();
+        return ResultUtils.success(list);
+    }
+
+    /**
+     * 后台分页查询。
+     */
+    @PostMapping("page")
+    public BaseResponse<Page<Film>> page(@RequestBody FilmQueryRequest filmQueryRequest) {
+        Page<Film> filmPage = filmService.queryFilmPage(filmQueryRequest);
+        return ResultUtils.success(filmPage);
     }
 
     /**
      * 根据主键获取。
-     *
-     * @param id 主键
-     * @return 详情
      */
     @GetMapping("getInfo/{id}")
-    public Film getInfo(@PathVariable Long id) {
-        return filmService.getById(id);
+    public BaseResponse<Film> getInfo(@PathVariable Long id) {
+        Film film = filmService.getById(id);
+        return ResultUtils.success(film);
     }
 
     /**
-     * 分页查询。
-     *
-     * @param page 分页对象
-     * @return 分页对象
+     * 修改影片状态（后台管理）。
      */
-    @GetMapping("page")
-    public Page<Film> page(Page<Film> page) {
-        return filmService.page(page);
+    @PutMapping("/status/{id}")
+    public BaseResponse<Boolean> updateStatus(@PathVariable Long id, @RequestParam String status) {
+        Film film = filmService.getById(id);
+        ThrowUtils.throwIf(film == null, ErrorCode.NOT_FOUND_ERROR);
+        film.setStatus(status);
+        boolean result = filmService.updateById(film);
+        return ResultUtils.success(result);
     }
 
 }

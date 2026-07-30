@@ -1,5 +1,7 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.common.BaseResponse;
+import com.limou.agent.common.ResultUtils;
 import com.mybatisflex.core.paginate.Page;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,12 +31,12 @@ public class CinemaController {
     /**
      * 保存。
      *
-     * @param cinema 
+     * @param cinema
      * @return {@code true} 保存成功，{@code false} 保存失败
      */
     @PostMapping("save")
-    public boolean save(@RequestBody Cinema cinema) {
-        return cinemaService.save(cinema);
+    public BaseResponse<Boolean> save(@RequestBody Cinema cinema) {
+        return ResultUtils.success(cinemaService.save(cinema));
     }
 
     /**
@@ -44,19 +46,19 @@ public class CinemaController {
      * @return {@code true} 删除成功，{@code false} 删除失败
      */
     @DeleteMapping("remove/{id}")
-    public boolean remove(@PathVariable Long id) {
-        return cinemaService.removeById(id);
+    public BaseResponse<Boolean> remove(@PathVariable Long id) {
+        return ResultUtils.success(cinemaService.removeById(id));
     }
 
     /**
      * 根据主键更新。
      *
-     * @param cinema 
+     * @param cinema
      * @return {@code true} 更新成功，{@code false} 更新失败
      */
     @PutMapping("update")
-    public boolean update(@RequestBody Cinema cinema) {
-        return cinemaService.updateById(cinema);
+    public BaseResponse<Boolean> update(@RequestBody Cinema cinema) {
+        return ResultUtils.success(cinemaService.updateById(cinema));
     }
 
     /**
@@ -65,8 +67,8 @@ public class CinemaController {
      * @return 所有数据
      */
     @GetMapping("list")
-    public List<Cinema> list() {
-        return cinemaService.list();
+    public BaseResponse<List<Cinema>> list() {
+        return ResultUtils.success(cinemaService.list());
     }
 
     /**
@@ -76,8 +78,8 @@ public class CinemaController {
      * @return 详情
      */
     @GetMapping("getInfo/{id}")
-    public Cinema getInfo(@PathVariable Long id) {
-        return cinemaService.getById(id);
+    public BaseResponse<Cinema> getInfo(@PathVariable Long id) {
+        return ResultUtils.success(cinemaService.getById(id));
     }
 
     /**
@@ -87,8 +89,8 @@ public class CinemaController {
      * @return 分页对象
      */
     @GetMapping("page")
-    public Page<Cinema> page(Page<Cinema> page) {
-        return cinemaService.page(page);
+    public BaseResponse<Page<Cinema>> page(Page<Cinema> page) {
+        return ResultUtils.success(cinemaService.page(page));
     }
 
 }
