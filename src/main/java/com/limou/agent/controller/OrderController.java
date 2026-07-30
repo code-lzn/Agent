@@ -86,15 +86,26 @@ public class OrderController {
     }
 
     /**
+     * 用户取消订单。
+     */
+    @PostMapping("/cancel/{id}")
+    public BaseResponse<Boolean> cancelOrder(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = getLoginUserId(httpRequest);
+        orderService.cancelOrder(id, userId);
+        return ResultUtils.success(true);
+    }
+
+    /**
      * 订单列表（当前用户）。
      */
     @GetMapping("/list")
     public BaseResponse<Page<OrderVO>> listOrders(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String status,
             HttpServletRequest httpRequest) {
         Long userId = getLoginUserId(httpRequest);
-        Page<OrderVO> orderPage = orderService.getUserOrders(userId, pageNum, pageSize);
+        Page<OrderVO> orderPage = orderService.getUserOrders(userId, pageNum, pageSize, status);
         return ResultUtils.success(orderPage);
     }
 

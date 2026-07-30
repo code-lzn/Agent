@@ -2,7 +2,11 @@ package com.limou.agent.controller;
 
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
+import com.limou.agent.model.entity.User;
+import com.limou.agent.service.UserService;
 import com.mybatisflex.core.paginate.Page;
+import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,6 +31,30 @@ public class UserPreferenceController {
 
     @Autowired
     private UserPreferenceService userPreferenceService;
+
+    @Resource
+    private UserService userService;
+
+    /**
+     * 获取当前用户的偏好。
+     */
+    @GetMapping("/my")
+    public BaseResponse<UserPreference> getMyPreference(HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        UserPreference pref = userPreferenceService.getByUserId(loginUser.getId());
+        return ResultUtils.success(pref);
+    }
+
+    /**
+     * 保存或更新当前用户的偏好。
+     */
+    @PostMapping("/my")
+    public BaseResponse<Boolean> saveMyPreference(@RequestBody UserPreference preference,
+                                                   HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        boolean result = userPreferenceService.saveOrUpdate(loginUser.getId(), preference);
+        return ResultUtils.success(result);
+    }
 
     /**
      * 保存。
