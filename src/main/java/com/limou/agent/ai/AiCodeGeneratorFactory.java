@@ -173,7 +173,7 @@ public class AiCodeGeneratorFactory {
                 .defaultSystem(systemPrompt)
                 .defaultToolCallbacks(wrappedTools)
                 .defaultAdvisors(
-                        QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
+//                        QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
 
