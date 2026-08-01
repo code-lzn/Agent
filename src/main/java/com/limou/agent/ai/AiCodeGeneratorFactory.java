@@ -53,7 +53,7 @@ public class AiCodeGeneratorFactory {
     private RedissonClient redissonClient;
     @Resource
     private ObjectMapper objectMapper;
-    @Resource
+//    @Resource
     private DocumentRagService documentRagService;
 
     private final Cache<Long, ChatClient> clientCache = Caffeine.newBuilder()
@@ -173,7 +173,7 @@ public class AiCodeGeneratorFactory {
                 .defaultSystem(systemPrompt)
                 .defaultToolCallbacks(wrappedTools)
                 .defaultAdvisors(
-//                        QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
+                        // QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
 
@@ -200,8 +200,7 @@ public class AiCodeGeneratorFactory {
     private record EventEmittingToolCallback(
             ToolCallback delegate,
             String displayName,
-            Sinks.Many<StreamChunk> sink
-    ) implements ToolCallback {
+            Sinks.Many<StreamChunk> sink) implements ToolCallback {
 
         @Override
         public String call(String toolInput) {
@@ -219,6 +218,22 @@ public class AiCodeGeneratorFactory {
     /** 清除指定 Agent 缓存 */
     public void evictAgentCache(String conversationId, String agentName) {
         agentCache.invalidate(conversationId + ":" + agentName);
+    }
+
+    /**
+     * 简单流式对话，不带工具、不带 RAG，但带对话记忆
+     * 用于 Graph 工作流的回复生成环节
+     */
+    public Flux<String> doSimpleChatStream(String prompt, String conversationId) {
+        MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(chatMemoryRepository)
+                .maxMessages(20)
+                .build();
+        chatHistoryService.loadChatHistory(Long.valueOf(conversationId), chatMemory, 20);
+        return ChatClient.builder(chatModel).build()
+                .prompt().user(prompt)
+                .advisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .stream().content();
     }
 
     public <T> Optional<T> doAgentChatStructured(String message, String conversationId, Class<T> outputType) {

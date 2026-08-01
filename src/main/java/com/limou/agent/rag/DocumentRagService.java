@@ -37,7 +37,7 @@ public class DocumentRagService {
         this.resourcePatternResolver = resourcePatternResolver;
     }
 
-    @PostConstruct
+//    @PostConstruct
     public void init() {
         try {
             vectorStore = SimpleVectorStore.builder(embeddingModel).build();
