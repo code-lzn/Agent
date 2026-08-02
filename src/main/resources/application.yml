@@ -133,3 +133,19 @@ alipay:
   sign_type: RSA2
   charset: utf-8
   format: json
+
+
+# ==================== 微信公众号登录配置 ====================
+# 请替换为你自己的微信公众号配置（https://mp.weixin.qq.com）
+weixin:
+  config:
+    # 公众号原始ID
+    originalid: gh_d15805fac5ad
+    # 公众号令牌（与微信后台配置一致即可）
+    token: b8b6
+    # 开发者ID(AppID)
+    app-id: wx6590c94986a76784
+    # 开发者密码(AppSecret)
+    app-secret: f8ac7b8f6b8c491fa0922ebbf9acc0d4
+    # 模板消息ID
+    template-id: RbEZ2jo47dQmF4A7_Ku7RsDy1x_5by6bk1Ox6rPCl4Y

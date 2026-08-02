@@ -101,5 +101,12 @@ public interface UserService extends IService<User> {
 
     /** 老用户修改密码（需校验旧密码） */
     void changePassword(Long userId, String oldPassword, String newPassword, String checkPassword);
+
+    /**
+     * 微信扫码登录 / 自动注册（合一）
+     * @param openid 微信用户唯一标识
+     * @return 登录用户信息
+     */
+    LoginUserVO weixinLogin(String openid, HttpServletRequest request);
 }
 
