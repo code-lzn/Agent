@@ -114,3 +114,38 @@ pexels:
 dashscope:
   api-key: ${dashscope.api-key}
   image-model: ${dashscope.image-model}
+
+# 支付宝沙箱支付配置 https://open.alipay.com/develop/sandbox/app
+alipay:
+  enabled: true
+  # 沙箱应用ID - 您的APPID，收款账号既是你的APPID对应支付宝账号
+  app_id: 9021000162681551
+  # 商户私钥，PKCS8格式RSA2私钥
+  app_private_key: MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCSMR1G3cYdw2Bv/uH8t3iPHbQJ6Y0aamIeLHkW2fZS2vxlZM/rwGWnYfKroJlbGWmV5kVMj+ldMFMaNKFoV/eRKVR5agnfu5X/Zi4wESQoTxNxNIVwCUsLFg1xK7jtHCbwgZsFnTsbwoOvAXHAqJv6lLu00j+HEUFSEoxfoQQ2QzOqfBoklm7rPMgXcfYjfMKDbBHq2saqFrXvhCzPB2vssXUZssLvbqzPl7itGtNoaCmG89WaBNwx4MI69eVNIu4+cnk7cPNQdzkNXH+niY2WuLqUeNRzdqhFH4KrmK2B+HUKWoD9S7JPMX/3Ki//gjmdIm4DQCmx3zGth2Vw1LfDAgMBAAECggEBAIbTBvYpaCJg4prHTXG9X1FWComtvDVlcXH0gARkJflJ/sYgEGWS/e09twkzxtsud6MISFcQzh7kh2++pDFQF4DnxgFnmw2cufxeJzCrTlZif0LDNmEaIPxrbSA3O4hpkzvxu5+U30N9w+ZthZQxrBCQhQCBepc9gamIc69qFzFWpRq03lNacQOpgnf9kfteQnkFuw7gYyB1oIg6ssAldBBRwWakoUln2/+jyHfO0AkRuArdj4FsTpGTFfMR1sSpMosne+Fso+8OreTwxGK1gLdqtFHHi9IeZ4E9RChjsZObU4vGUdN1JRgA72xcU11Gjdh/kN6nMRTlel74P4hOe7kCgYEA5FnOmCHlHgUBdiCwfXvf3drl3xy+bi66KxiCb9+QnK8AMleNirnXssIwELnpK+F46pF/2UvT8i3saN0tjmDTlpe27L7KWozLrH5grVmNyb4WNCaV6oC3txHDy3V1mDLl5YnNm3OQ2wQkbzxu3dpgZezkFZQVFIdWoTkVZ14/MDUCgYEAo+SgCNOg3AGwQAL2X44ilZV55NW2LRBl+H6Hm0A3y+zvKhBC4IiZ9PWJ4PQbjutL7oLD0dGf8LQwKChAI1uJBWMiIzV2QDWDtKDYq16bwIni0UK4/OzClhqu2V0yoczhisQyWd4w1zZJz0FYuRdntV/fXKxP7cENtQszyqAcNxcCgYEA28eILSpqX9NHjc92rr/cPqahmnUK3/d/XV0wpcZSZEuW790OsRefgECgjGizAHX5sCKsH5N5Ad2rbV57q06MN6P7/q6/Chn7KiFUoWPRMPwQWM9OeS68I6oofZmmvf83AA764oR/Rh0diCZtOoAlSdSPzikBhQmhmnjbneq6/IUCgYBhzDRe8AHGJs/IcrwXqxYiEo8pKQnLfESM8tvynXBuJJVWkVuG5pyQGtDKxn+HWgr2aVt2YdNB7BPscpBLSPzLlSsyvV0x1X0hFPYV1J+2VdFeM6V1b8ZxkbySglWLTVms14SAMeENGx0SKplJ4ZiGF46Om1gatJ98UBH4sHAFwwKBgGPMg0o3rru0NlMwstljYnckpVK28PkiIqtc1UP9fs4GdGawV2SBSFh3oG+juTDfOlmc3JBY38inE+uBdMCMZQs5GIiuVX0zJ5uDZaA4z7TF/lkJZO0T04a4X/Cy//ACIGMeBCto62WHvIPd3RIYhkqdYoiCvKE7mHLrCuzKGAhA
+  # 支付宝公钥 -【秘钥填写】后提供给你的支付宝公钥
+  alipay_public_key: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqa4Oi8tUvYnecolc3DI77PjZZmP+LRugnoCZQQjV93ZJlpBIpXq9Y+3turoiHYJO7B2Os+pgYsQG7A+BZOGqvNeDBHSVmjjs+xyzjam/7FDm3KMV24hhtBqwJmVyH69lE8av9SeKCOdbOD3EoF4cudXalIcHDSpzxafzisadLybdxcp99FeW6jNZ39KguTSbtZEFNlilAAa0Qfs7yu+WpMOF8ittYYG91quEnfda5dBFWKq1h8gLLCYv4LLbN0YErfr9cZsXbRjr0e+hz6d6p5+tk3FSjeS6qCPfTU7AC7CPePhwPWNlo/HzGQGoJuURXj0sSr604ZNWqzdgRRnTnwIDAQAB
+  # 服务器异步通知页面路径 - natapp 内网穿透
+  notify_url: http://lbljh.nat100.top/api/payment/alipay/notify
+  # 页面跳转同步通知页面路径
+  return_url: https://gaga.plus
+  # 沙箱网关地址
+  gatewayUrl: https://openapi-sandbox.dl.alipaydev.com/gateway.do
+  sign_type: RSA2
+  charset: utf-8
+  format: json
+
+
+# ==================== 微信公众号登录配置 ====================
+# 请替换为你自己的微信公众号配置（https://mp.weixin.qq.com）
+weixin:
+  config:
+    # 公众号原始ID
+    originalid: gh_d15805fac5ad
+    # 公众号令牌（与微信后台配置一致即可）
+    token: b8b6
+    # 开发者ID(AppID)
+    app-id: wx6590c94986a76784
+    # 开发者密码(AppSecret)
+    app-secret: f8ac7b8f6b8c491fa0922ebbf9acc0d4
+    # 模板消息ID
+    template-id: RbEZ2jo47dQmF4A7_Ku7RsDy1x_5by6bk1Ox6rPCl4Y

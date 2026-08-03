@@ -1,5 +1,6 @@
 package com.limou.agent.controller;
 
+import cn.hutool.core.util.StrUtil;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
 import com.limou.agent.exception.BusinessException;
@@ -28,11 +29,65 @@ public class FilmController {
 
     // ========== 前台接口 ==========
 
-    /** 影片列表（筛选 + 排序 + 分页）。
-     * 前端传 status=hot 取热映，status=upcoming 取即将上映
+    /**
+     * 正在热映（评分最高的前 N 部已发布影片）。
+     */
+    @GetMapping("/now-showing")
+    public BaseResponse<List<Film>> nowShowing(@RequestParam(defaultValue = "8") int limit) {
+        FilmQueryRequest req = new FilmQueryRequest();
+        req.setStatus("published");
+        req.setPageNum(1);
+        req.setPageSize(limit);
+        req.setSortField("rating");
+        req.setSortOrder("descend");
+        Page<Film> page = filmService.queryFilmPage(req);
+        return ResultUtils.success(page.getRecords());
+    }
+
+    /**
+     * 猜你喜欢（根据用户偏好类型推荐，未登录或无偏好时返回热门）。
+     */
+    @GetMapping("/recommended")
+    public BaseResponse<List<Film>> recommended(@RequestParam(defaultValue = "4") int limit,
+                                                 @RequestParam(required = false) String type) {
+        FilmQueryRequest req = new FilmQueryRequest();
+        req.setStatus("published");
+        req.setPageNum(1);
+        req.setPageSize(limit);
+        if (StrUtil.isNotBlank(type)) {
+            req.setType(type);
+        }
+        req.setSortField("rating");
+        req.setSortOrder("descend");
+        Page<Film> page = filmService.queryFilmPage(req);
+        return ResultUtils.success(page.getRecords());
+    }
+
+    /**
+     * 搜索影片（关键词模糊匹配）。
+     */
+    @GetMapping("/search")
+    public BaseResponse<Page<Film>> search(@RequestParam String keyword,
+                                            @RequestParam(defaultValue = "1") int pageNum,
+                                            @RequestParam(defaultValue = "10") int pageSize) {
+        FilmQueryRequest req = new FilmQueryRequest();
+        req.setKeyword(keyword);
+        req.setStatus("published");
+        req.setPageNum(pageNum);
+        req.setPageSize(pageSize);
+        Page<Film> page = filmService.queryFilmPage(req);
+        return ResultUtils.success(page);
+    }
+
+    /**
+     * 影片列表（筛选 + 排序 + 分页，仅返回已发布影片）。
      */
     @GetMapping("/list")
     public BaseResponse<Page<Film>> listFilm(FilmQueryRequest filmQueryRequest) {
+        // 前台只查已发布的
+        if (filmQueryRequest.getStatus() == null) {
+            filmQueryRequest.setStatus("published");
+        }
         Page<Film> filmPage = filmService.queryFilmPage(filmQueryRequest);
         return ResultUtils.success(filmPage);
     }

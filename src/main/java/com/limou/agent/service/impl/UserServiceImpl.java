@@ -334,4 +334,27 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         updateById(user);
     }
 
+    // ==================== weixinLogin ====================
+    @Override
+    public LoginUserVO weixinLogin(String openid, HttpServletRequest request) {
+        if (StrUtil.isBlank(openid)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "openid 为空");
+        }
+        String weixinAccount = "wx_" + openid;
+        // 按 userAccount 查
+        User user = this.mapper.selectOneByQuery(
+                new QueryWrapper().eq(User::getUserAccount, weixinAccount));
+        if (user == null) {
+            // 自动注册
+            user = new User();
+            user.setUserAccount(weixinAccount);
+            user.setUserName("微信用户" + openid.substring(Math.max(0, openid.length() - 6)));
+            user.setUserPassword(encryptPassword("12345678"));
+            user.setUserRole(UserRoleEnum.USER.getValue());
+            save(user);
+        }
+        request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
+        return this.getLoginUserVO(user);
+    }
+
 }

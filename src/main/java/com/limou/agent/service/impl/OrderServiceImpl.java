@@ -4,6 +4,7 @@ package com.limou.agent.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
+import cn.hutool.core.util.StrUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
@@ -238,9 +239,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     @Override
-    public Page<OrderVO> getUserOrders(Long userId, int pageNum, int pageSize) {
+    public Page<OrderVO> getUserOrders(Long userId, int pageNum, int pageSize, String status) {
         QueryWrapper qw = QueryWrapper.create()
                 .eq("userId", userId)
+                .eq("status", status, StrUtil.isNotBlank(status))
                 .orderBy("createTime", false);
         Page<Order> orderPage = this.page(Page.of(pageNum, pageSize), qw);
 
@@ -295,6 +297,41 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         log.info("定时任务：取消 {} 个超时订单，释放 {} 个座位", timeoutOrders.size(),
                 timeoutOrders.stream().mapToLong(o -> o.getCount()).sum());
         return timeoutOrders.size();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelOrder(Long orderId, Long userId) {
+        if (orderId == null || orderId <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "订单ID无效");
+        }
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
+        }
+        if (!"pending".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "只有待支付订单可以取消");
+        }
+
+        // 取消订单
+        order.setStatus("cancelled");
+        order.setCancelReason("user_cancelled");
+        this.updateById(order);
+
+        // 释放座位
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", orderId);
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
+        if (CollUtil.isNotEmpty(seatIds)) {
+            List<Seat> seats = seatService.listByIds(seatIds);
+            seats.forEach(s -> s.setStatus("available"));
+            seatService.updateBatch(seats);
+        }
+
+        log.info("用户 {} 取消订单 {}，释放 {} 个座位", userId, order.getOrderNo(), seatIds.size());
     }
 
     @Override

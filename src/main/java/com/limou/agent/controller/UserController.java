@@ -1,6 +1,7 @@
 package com.limou.agent.controller;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.limou.agent.annotation.AuthCheck;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.DeleteRequest;
@@ -15,13 +16,9 @@ import com.limou.agent.model.vo.UserVO;
 import com.mybatisflex.core.paginate.Page;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 import com.limou.agent.model.entity.User;
 import com.limou.agent.service.UserService;
-import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
@@ -247,6 +244,16 @@ public class UserController {
     public BaseResponse<Boolean> userLogout(HttpServletRequest request) {
         boolean logout = userService.userLogout(request);
         return ResultUtils.success(logout);
+    }
+
+    /**
+     * 微信扫码登录 / 自动注册
+     */
+    @PostMapping("/login-by-weixin")
+    public BaseResponse<LoginUserVO> weixinLogin(@RequestParam("openid") String openid,
+                                                  HttpServletRequest request) {
+        ThrowUtils.throwIf(StrUtil.isBlank(openid), ErrorCode.PARAMS_ERROR);
+        return ResultUtils.success(userService.weixinLogin(openid, request));
     }
 
 }

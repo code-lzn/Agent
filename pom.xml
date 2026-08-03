@@ -192,6 +192,31 @@
             <version>1.19.1</version>
         </dependency>
 
+        <!-- ==================== 微信登录相关依赖 ==================== -->
+        <!-- Retrofit2 HTTP 客户端（调用微信公众号 API） -->
+        <dependency>
+            <groupId>com.squareup.retrofit2</groupId>
+            <artifactId>retrofit</artifactId>
+            <version>2.9.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.retrofit2</groupId>
+            <artifactId>converter-jackson</artifactId>
+            <version>2.9.0</version>
+        </dependency>
+        <!-- XStream：Bean ↔ XML 互转 -->
+        <dependency>
+            <groupId>com.thoughtworks.xstream</groupId>
+            <artifactId>xstream</artifactId>
+            <version>1.4.20</version>
+        </dependency>
+        <!-- dom4j：XML 解析 -->
+        <dependency>
+            <groupId>org.dom4j</groupId>
+            <artifactId>dom4j</artifactId>
+            <version>2.1.4</version>
+        </dependency>
+
         <!-- 支付宝沙箱 SDK -->
         <dependency>
             <groupId>com.alipay.sdk</groupId>

@@ -58,14 +58,23 @@ public interface OrderService extends IService<Order> {
      * @param userId   用户ID
      * @param pageNum  页码
      * @param pageSize 每页大小
+     * @param status   订单状态（可选）
      * @return 分页结果
      */
-    Page<OrderVO> getUserOrders(Long userId, int pageNum, int pageSize);
+    Page<OrderVO> getUserOrders(Long userId, int pageNum, int pageSize, String status);
 
     /**
      * 取消超时订单（定时任务）。
      */
     int cancelTimeoutOrders();
+
+    /**
+     * 用户取消订单。
+     *
+     * @param orderId 订单ID
+     * @param userId  用户ID
+     */
+    void cancelOrder(Long orderId, Long userId);
 
     /**
      * 取消指定订单（管理员取消/退款），释放座位。
