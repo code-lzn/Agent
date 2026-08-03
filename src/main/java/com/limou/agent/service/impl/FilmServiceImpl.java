@@ -1,5 +1,6 @@
 package com.limou.agent.service.impl;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
@@ -44,8 +45,10 @@ public class FilmServiceImpl extends ServiceImpl<FilmMapper, Film> implements Fi
         if (StrUtil.isNotBlank(type)) {
             queryWrapper.like("type", type);
         }
-        // 状态筛选
-        if (StrUtil.isNotBlank(status)) {
+        // 状态筛选（优先多状态 IN 查询，其次单状态）
+        if (CollUtil.isNotEmpty(filmQueryRequest.getStatusList())) {
+            queryWrapper.in("status", filmQueryRequest.getStatusList());
+        } else if (StrUtil.isNotBlank(status)) {
             queryWrapper.eq("status", status);
         }
         // 排序

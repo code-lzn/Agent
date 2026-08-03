@@ -5,6 +5,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
@@ -57,6 +58,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private AlipayService alipayService;
+
+    @Autowired
+    private SystemConfigService systemConfigService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -352,6 +356,16 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "已完成订单无法取消");
         }
 
+        // PRD 3.3.5 交互规则③：退款校验读取系统配置退款策略，超出可退款时限禁止退款
+        if ("paid".equals(order.getStatus())) {
+            int refundHours = getRefundTimeoutHours();
+            LocalDateTime paidAt = order.getPaidAt();
+            if (paidAt != null && paidAt.plusHours(refundHours).isBefore(LocalDateTime.now())) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                        "已超出可退款时限（" + refundHours + " 小时），无法退款");
+            }
+        }
+
         // 取消订单
         order.setStatus("cancelled");
         order.setCancelReason(reason);
@@ -380,6 +394,24 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     /**
+     * 读取可退款时限（小时），默认 24 小时。配置键：refundTimeoutHours
+     */
+    private int getRefundTimeoutHours() {
+        try {
+            SystemConfig config = systemConfigService.getOne(
+                    QueryWrapper.create().eq("configKey", "refundTimeoutHours"));
+            if (config == null || StrUtil.isBlank(config.getConfigValue())) {
+                return 24;
+            }
+            Object val = JSONUtil.parse(config.getConfigValue());
+            return val instanceof Number ? ((Number) val).intValue() : Integer.parseInt(val.toString());
+        } catch (Exception e) {
+            log.warn("读取退款时限配置失败，使用默认 24 小时", e);
+            return 24;
+        }
+    }
+
+    /**
      * 构建 OrderVO。
      */
     private OrderVO buildOrderVO(Order order, List<Seat> seats) {
@@ -387,6 +419,20 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         BeanUtil.copyProperties(order, vo);
         if (seats != null) {
             vo.setSeatLabels(seats.stream().map(Seat::getSeatLabel).collect(Collectors.toList()));
+        }
+        // 影片海报：订单快照不含海报，通过 场次→影片 关联获取
+        if (order.getScheduleId() != null) {
+            try {
+                Schedule schedule = scheduleService.getById(order.getScheduleId());
+                if (schedule != null && schedule.getFilmId() != null) {
+                    Film film = filmService.getById(schedule.getFilmId());
+                    if (film != null) {
+                        vo.setPosterUrl(film.getPosterUrl());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("解析订单海报失败: orderId={}", order.getId(), e);
+            }
         }
         return vo;
     }

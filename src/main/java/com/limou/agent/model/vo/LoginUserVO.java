@@ -39,6 +39,11 @@ public class LoginUserVO implements Serializable {
     private String userRole;
 
     /**
+     * 账号状态：0 正常 / 1 冻结
+     */
+    private Integer userStatus;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

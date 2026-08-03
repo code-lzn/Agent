@@ -25,6 +25,12 @@ public class OrderVO implements Serializable {
     private Long userId;
     private Long scheduleId;
     private String filmName;
+
+    /**
+     * 影片海报（通过场次关联影片获取）
+     */
+    private String posterUrl;
+
     private String cinemaName;
     private String scheduleTime;
     private String hallName;

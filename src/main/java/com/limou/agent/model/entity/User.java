@@ -73,6 +73,12 @@ public class User implements Serializable {
     private String userRole;
 
     /**
+     * 账号状态：0 正常 / 1 冻结（冻结后 C 端无法登录、无法购票）
+     */
+    @Column("status")
+    private Integer userStatus;
+
+    /**
      * 编辑时间
      */
     @Column("editTime")

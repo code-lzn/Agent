@@ -6,6 +6,7 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.List;
 
 /**
  * 影片查询请求。
@@ -27,9 +28,14 @@ public class FilmQueryRequest extends PageRequest implements Serializable {
     private String type;
 
     /**
-     * 状态: draft/published/offline
+     * 状态: draft/upcoming/hot/published/offline
      */
     private String status;
+
+    /**
+     * 多状态查询（IN），优先级高于 status
+     */
+    private List<String> statusList;
 
     @Serial
     private static final long serialVersionUID = 1L;

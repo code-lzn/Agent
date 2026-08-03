@@ -156,7 +156,11 @@ public class OrderController {
     @PostMapping("/admin/cancel/{id}")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> adminCancel(@PathVariable Long id) {
-        orderService.cancelOrder(id, "user_cancelled");
+        Order order = orderService.getById(id);
+        ThrowUtils.throwIf(order == null, ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        // 待支付订单 → 管理员取消；已支付订单 → 管理员退款（原因区分，不再显示"用户主动取消"）
+        String reason = "paid".equals(order.getStatus()) ? "admin_refund" : "admin_cancelled";
+        orderService.cancelOrder(id, reason);
         return ResultUtils.success(true);
     }
 }

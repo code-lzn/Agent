@@ -2,8 +2,14 @@ package com.limou.agent.controller;
 
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
+import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.exception.ThrowUtils;
+import com.limou.agent.service.ScheduleService;
 import com.mybatisflex.core.paginate.Page;
+import com.mybatisflex.core.query.QueryWrapper;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import java.sql.Date;
+import java.time.LocalDate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,6 +34,9 @@ public class CinemaController {
     @Autowired
     private CinemaService cinemaService;
 
+    @Autowired
+    private ScheduleService scheduleService;
+
     /**
      * 保存。
      *
@@ -47,7 +56,16 @@ public class CinemaController {
      */
     @DeleteMapping("remove/{id}")
     public BaseResponse<Boolean> remove(@PathVariable Long id) {
-        return ResultUtils.success(cinemaService.removeById(id));
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
+        // PRD 3.3.3.2 交互规则③：有"未放映"场次（今天及以后）的影院禁止删除，需先清空场次
+        long scheduleCount = scheduleService.count(QueryWrapper.create()
+                .eq("cinemaId", id)
+                .ge("showDate", Date.valueOf(LocalDate.now())));
+        ThrowUtils.throwIf(scheduleCount > 0, ErrorCode.OPERATION_ERROR,
+                "该影院存在未放映的场次，禁止删除，请先清空场次");
+        boolean result = cinemaService.removeById(id);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
     }
 
     /**

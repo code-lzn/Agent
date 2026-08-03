@@ -37,4 +37,19 @@ public class UserPreferenceServiceImpl extends ServiceImpl<UserPreferenceMapper,
             return this.save(preference);
         }
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean resetByUserId(Long userId) {
+        UserPreference existing = getByUserId(userId);
+        if (existing == null) {
+            return true; // 无画像，无需重置
+        }
+        existing.setPreferredTypes(null);
+        existing.setPreferredHallType(null);
+        existing.setBudgetMax(null);
+        existing.setFrequentCinemaId(null);
+        existing.setPreferredSeatZone(null);
+        return this.updateById(existing);
+    }
 }

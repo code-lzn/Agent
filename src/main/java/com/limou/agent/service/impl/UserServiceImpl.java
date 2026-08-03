@@ -74,6 +74,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         user.setUserPassword(encryptUserPassword);
         user.setUserName("无名");
         user.setUserRole(UserRoleEnum.USER.getValue());
+        user.setUserStatus(0);
 //        boolean save = this.mapper.(user) > 0;
         boolean save = save(user);
         if (!save) {
@@ -126,6 +127,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (user == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
+        // PRD 3.3.5：冻结账号禁止登录
+        checkUserFrozen(user);
         //4.记录用户的登录态
         request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
         //5.返回
@@ -258,6 +261,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             user.setUserRole(UserRoleEnum.USER.getValue());
             save(user);
         }
+        // PRD 3.3.5：冻结账号禁止登录
+        checkUserFrozen(user);
         request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
         return this.getLoginUserVO(user);
     }
@@ -355,6 +360,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
         return this.getLoginUserVO(user);
+    }
+
+    /**
+     * 校验账号是否被冻结（userStatus = 1 表示冻结）
+     */
+    private void checkUserFrozen(User user) {
+        if (user != null && Integer.valueOf(1).equals(user.getUserStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "账号已被冻结，无法登录，请联系管理员");
+        }
     }
 
 }
