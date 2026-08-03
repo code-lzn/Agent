@@ -148,10 +148,20 @@ public class OrderController {
     }
 
     /**
+     * 用户申请退款（需验证开场时间）。
+     */
+    @PostMapping("/refund/{id}")
+    public BaseResponse<Boolean> refundOrder(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = getLoginUserId(httpRequest);
+        orderService.refundOrder(id, userId);
+        return ResultUtils.success(true);
+    }
+
+    /**
      * 后台 - 取消/退款订单。
      * <p>
      * 对 pending 订单：取消并释放座位。
-     * 对 paid 订单：取消并释放座位（退款需在支付宝沙箱手动操作）。
+     * 对 paid 订单：调用支付宝退款后取消。
      */
     @PostMapping("/admin/cancel/{id}")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -161,6 +171,16 @@ public class OrderController {
         // 待支付订单 → 管理员取消；已支付订单 → 管理员退款（原因区分，不再显示"用户主动取消"）
         String reason = "paid".equals(order.getStatus()) ? "admin_refund" : "admin_cancelled";
         orderService.cancelOrder(id, reason);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 后台 - 退款订单（调用支付宝退款）。
+     */
+    @PostMapping("/admin/refund/{id}")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> adminRefund(@PathVariable Long id) {
+        orderService.cancelOrder(id, "admin_refund");
         return ResultUtils.success(true);
     }
 }

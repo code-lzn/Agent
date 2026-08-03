@@ -85,6 +85,11 @@ public interface OrderService extends IService<Order> {
     void cancelOrder(Long orderId, String reason);
 
     /**
+     * 用户申请退款（需验证开场时间）。
+     */
+    void refundOrder(Long orderId, Long userId);
+
+    /**
      * 释放已锁定的座位（无关联订单的锁定座位）。
      */
     int releaseOrphanLocks();

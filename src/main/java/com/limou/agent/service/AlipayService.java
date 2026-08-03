@@ -5,6 +5,8 @@ import com.alipay.api.AlipayClient;
 import com.alipay.api.DefaultAlipayClient;
 import com.alipay.api.internal.util.AlipaySignature;
 import com.alipay.api.request.AlipayTradePagePayRequest;
+import com.alipay.api.request.AlipayTradeRefundRequest;
+import com.alipay.api.response.AlipayTradeRefundResponse;
 import com.limou.agent.config.AlipayConfig;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -92,6 +94,31 @@ public class AlipayService {
         } catch (AlipayApiException e) {
             log.error("支付宝通知签名验证失败", e);
             return false;
+        }
+    }
+
+    /**
+     * 支付宝沙箱退款。
+     */
+    public boolean refund(String orderNo, String refundAmount, String tradeNo) {
+        AlipayTradeRefundRequest request = new AlipayTradeRefundRequest();
+        cn.hutool.json.JSONObject bizContent = new cn.hutool.json.JSONObject();
+        bizContent.set("out_trade_no", orderNo);
+        bizContent.set("refund_amount", refundAmount);
+        bizContent.set("out_request_no", orderNo + "_refund");
+        request.setBizContent(bizContent.toString());
+        try {
+            AlipayTradeRefundResponse response = alipayClient.execute(request);
+            if (response.isSuccess() && "10000".equals(response.getCode())) {
+                log.info("支付宝退款成功，订单号: {}, 退款金额: {}", orderNo, refundAmount);
+                return true;
+            } else {
+                log.error("支付宝退款失败，订单号: {}, code: {}, msg: {}", orderNo, response.getCode(), response.getMsg());
+                return false;
+            }
+        } catch (AlipayApiException e) {
+            log.error("支付宝退款异常，订单号: {}", orderNo, e);
+            throw new RuntimeException("支付宝退款请求失败: " + e.getErrMsg());
         }
     }
 }

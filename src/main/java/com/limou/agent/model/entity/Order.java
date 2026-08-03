@@ -101,6 +101,24 @@ public class Order implements Serializable {
     private String cancelReason;
 
     /**
+     * 退款金额（元）
+     */
+    @Column("refundAmount")
+    private BigDecimal refundAmount;
+
+    /**
+     * 支付宝退款交易号
+     */
+    @Column("refundTradeNo")
+    private String refundTradeNo;
+
+    /**
+     * 退款时间
+     */
+    @Column("refundTime")
+    private LocalDateTime refundTime;
+
+    /**
      * 支付宝交易号（沙箱生成）
      */
     @Column("alipayTradeNo")
