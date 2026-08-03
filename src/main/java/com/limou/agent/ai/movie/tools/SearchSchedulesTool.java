@@ -43,7 +43,7 @@ public class SearchSchedulesTool extends BaseTool {
     @Tool(description = "搜索放映场次，需传入影片ID。可选影院ID、日期、厅型。返回场次列表JSON，含影厅名、时间、价格、余座数")
     public String searchSchedules(
             @ToolParam(description = "影片ID（必填）") Long filmId,
-            @ToolParam(description = "影院ID（可选）") Long cinemaId,
+            @ToolParam(description = "影院ID（可选）", required = false) Long cinemaId,
             @ToolParam(description = "放映日期 yyyy-MM-dd（可选）") String showDate,
             @ToolParam(description = "厅型偏好，如 IMAX/杜比/普通/4DX/VIP（可选）") String hallType
     ) {

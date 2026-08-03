@@ -92,6 +92,7 @@ public class MovieStateManager {
         if (newSlots.getFilmType() != null) state.setFilmType(newSlots.getFilmType());
         if (newSlots.getCinemaId() != null) state.setCinemaId(newSlots.getCinemaId());
         if (newSlots.getCinemaName() != null) state.setCinemaName(newSlots.getCinemaName());
+        if (newSlots.getCurrentCity() != null) state.setCurrentCity(newSlots.getCurrentCity());
         if (newSlots.getHallType() != null) state.setHallType(newSlots.getHallType());
         if (newSlots.getShowDate() != null) state.setShowDate(newSlots.getShowDate());
         if (newSlots.getStartTime() != null) state.setStartTime(newSlots.getStartTime());

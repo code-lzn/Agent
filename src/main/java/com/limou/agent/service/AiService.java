@@ -92,5 +92,6 @@ public interface AiService {
      * @param userId         用户ID
      * @return 流式响应
      */
-    Flux<ServerSentEvent<String>> doMovieSmartChatStream(String message, String conversationId, Long userId);
+    Flux<ServerSentEvent<String>> doMovieSmartChatStream(
+            String message, String conversationId, Long userId, String currentCity);
 }
