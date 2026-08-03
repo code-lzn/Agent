@@ -97,7 +97,8 @@ public class ScheduleController {
      */
     @PutMapping("update")
     public BaseResponse<Boolean> update(@RequestBody Schedule schedule) {
-        boolean result = scheduleService.updateById(schedule);
+        // 带保护校验：已放映场次禁止修改；有订单场次禁止改关键字段（PRD 4.2.3）
+        boolean result = scheduleService.updateSchedule(schedule);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }

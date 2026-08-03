@@ -35,4 +35,14 @@ public interface ScheduleService extends IService<Schedule> {
      * @return 排期ID
      */
     Long saveScheduleWithSeats(Schedule schedule);
+
+    /**
+     * 更新排期（带保护校验）：
+     * - 已放映场次禁止修改
+     * - 已有订单的场次禁止修改影厅/影片/日期/时间/票价（PRD 4.2.3）
+     *
+     * @param schedule 排期信息
+     * @return 是否成功
+     */
+    boolean updateSchedule(Schedule schedule);
 }

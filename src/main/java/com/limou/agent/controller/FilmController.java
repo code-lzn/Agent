@@ -190,6 +190,11 @@ public class FilmController {
     public BaseResponse<Boolean> updateStatus(@PathVariable Long id, @RequestParam String status) {
         Film film = filmService.getById(id);
         ThrowUtils.throwIf(film == null, ErrorCode.NOT_FOUND_ERROR);
+        // 发布时：上映日期未到 → 准备上映(upcoming)；已到/已过 → 正在上映(published)
+        if ("published".equals(status) && film.getReleaseDate() != null
+                && film.getReleaseDate().after(Date.valueOf(LocalDate.now()))) {
+            status = "upcoming";
+        }
         film.setStatus(status);
         boolean result = filmService.updateById(film);
         return ResultUtils.success(result);

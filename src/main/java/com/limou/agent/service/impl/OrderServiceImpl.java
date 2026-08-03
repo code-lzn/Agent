@@ -393,6 +393,58 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void refundOrderAdmin(Long orderId) {
+        if (orderId == null || orderId <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "订单ID无效");
+        }
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        }
+        if (!"paid".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅已支付订单可退款");
+        }
+        if ("refunded".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已退款，不可重复操作");
+        }
+        // 退款时限校验（读系统配置 refundTimeoutHours）
+        int refundHours = getRefundTimeoutHours();
+        LocalDateTime paidAt = order.getPaidAt();
+        if (paidAt != null && paidAt.plusHours(refundHours).isBefore(LocalDateTime.now())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "已超出可退款时限（" + refundHours + " 小时），无法退款");
+        }
+        // 调用支付宝沙箱退款
+        String refundAmount = order.getTotalPrice().toString();
+        boolean refundSuccess = alipayService.refund(order.getOrderNo(), refundAmount, order.getAlipayTradeNo());
+        if (!refundSuccess) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
+        }
+        order.setStatus("refunded");
+        order.setCancelReason("admin_refund");
+        order.setRefundAmount(order.getTotalPrice());
+        order.setRefundTime(LocalDateTime.now());
+        this.updateById(order);
+        // 释放座位
+        releaseSeats(orderId);
+        log.info("管理员退款成功，订单号: {}, 退款金额: {}", order.getOrderNo(), refundAmount);
+    }
+
+    /**
+     * 释放订单关联的座位（置为 available）。
+     */
+    private void releaseSeats(Long orderId) {
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", orderId);
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
+        if (CollUtil.isNotEmpty(seatIds)) {
+            List<Seat> seats = seatService.listByIds(seatIds);
+            seats.forEach(s -> s.setStatus("available"));
+            seatService.updateBatch(seats);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void cancelOrder(Long orderId, String reason) {
         if (orderId == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "订单ID不能为空");

@@ -168,19 +168,22 @@ public class OrderController {
     public BaseResponse<Boolean> adminCancel(@PathVariable Long id) {
         Order order = orderService.getById(id);
         ThrowUtils.throwIf(order == null, ErrorCode.NOT_FOUND_ERROR, "订单不存在");
-        // 待支付订单 → 管理员取消；已支付订单 → 管理员退款（原因区分，不再显示"用户主动取消"）
-        String reason = "paid".equals(order.getStatus()) ? "admin_refund" : "admin_cancelled";
-        orderService.cancelOrder(id, reason);
+        // 待支付订单 → 管理员取消；已支付订单 → 完整退款（调支付宝 + 置 refunded + 释放座位）
+        if ("paid".equals(order.getStatus())) {
+            orderService.refundOrderAdmin(id);
+        } else {
+            orderService.cancelOrder(id, "admin_cancelled");
+        }
         return ResultUtils.success(true);
     }
 
     /**
-     * 后台 - 退款订单（调用支付宝退款）。
+     * 后台 - 退款订单（调用支付宝退款，完整退款流程）。
      */
     @PostMapping("/admin/refund/{id}")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> adminRefund(@PathVariable Long id) {
-        orderService.cancelOrder(id, "admin_refund");
+        orderService.refundOrderAdmin(id);
         return ResultUtils.success(true);
     }
 }

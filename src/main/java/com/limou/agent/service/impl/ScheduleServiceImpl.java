@@ -23,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.Date;
 import java.sql.Time;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -46,6 +48,10 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Autowired
     @Lazy
     private SeatService seatService;
+
+    @Autowired
+    @Lazy
+    private OrderService orderService;
 
     @Override
     public List<ScheduleVO> queryScheduleList(Long filmId, Long cinemaId, Date showDate) {
@@ -215,5 +221,54 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
 
         seatService.saveBatch(seats);
         return schedule.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updateSchedule(Schedule schedule) {
+        if (schedule == null || schedule.getId() == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "场次ID不能为空");
+        }
+        Schedule old = this.getById(schedule.getId());
+        if (old == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "场次不存在");
+        }
+        // 已放映场次禁止修改（历史数据锁定，避免影响已产生的订单/座位）
+        if (isPastShowtime(old)) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "该场次已放映，禁止修改");
+        }
+        // 已有订单的场次：禁止修改影厅/影片/日期/时间/票价（PRD 4.2.3）
+        long orderCount = orderService.count(QueryWrapper.create().eq("scheduleId", schedule.getId()));
+        if (orderCount > 0 && hasCriticalChange(old, schedule)) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "该场次已有订单，禁止修改影厅/影片/时间/票价");
+        }
+        return this.updateById(schedule);
+    }
+
+    /**
+     * 判断场次是否已放映：showDate < 今天，或 今天且 startTime 已过
+     */
+    private boolean isPastShowtime(Schedule s) {
+        if (s.getShowDate() == null) return false;
+        Date today = Date.valueOf(LocalDate.now());
+        if (s.getShowDate().before(today)) return true;
+        if (s.getShowDate().equals(today)) {
+            String now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"));
+            if (s.getStartTime() != null && s.getStartTime().compareTo(now) < 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 关键字段是否有变更（影厅/影片/日期/时间/票价）
+     */
+    private boolean hasCriticalChange(Schedule old, Schedule submitted) {
+        return !Objects.equals(old.getHallId(), submitted.getHallId())
+                || !Objects.equals(old.getFilmId(), submitted.getFilmId())
+                || !Objects.equals(old.getShowDate(), submitted.getShowDate())
+                || !Objects.equals(old.getStartTime(), submitted.getStartTime())
+                || !Objects.equals(old.getPrice(), submitted.getPrice());
     }
 }

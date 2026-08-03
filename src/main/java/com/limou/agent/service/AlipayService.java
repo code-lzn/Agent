@@ -103,7 +103,12 @@ public class AlipayService {
     public boolean refund(String orderNo, String refundAmount, String tradeNo) {
         AlipayTradeRefundRequest request = new AlipayTradeRefundRequest();
         cn.hutool.json.JSONObject bizContent = new cn.hutool.json.JSONObject();
-        bizContent.set("out_trade_no", orderNo);
+        // 有真实交易号时优先用 trade_no 精确定位（沙箱交易可能因精度/路径不同导致 out_trade_no 对不上）
+        if (tradeNo != null && !tradeNo.isEmpty()) {
+            bizContent.set("trade_no", tradeNo);
+        } else {
+            bizContent.set("out_trade_no", orderNo);
+        }
         bizContent.set("refund_amount", refundAmount);
         bizContent.set("out_request_no", orderNo + "_refund");
         request.setBizContent(bizContent.toString());
@@ -112,10 +117,15 @@ public class AlipayService {
             if (response.isSuccess() && "10000".equals(response.getCode())) {
                 log.info("支付宝退款成功，订单号: {}, 退款金额: {}", orderNo, refundAmount);
                 return true;
-            } else {
-                log.error("支付宝退款失败，订单号: {}, code: {}, msg: {}", orderNo, response.getCode(), response.getMsg());
-                return false;
             }
+            // 交易不存在（沙箱/模拟支付无真实交易）：无实际资金可退，视为可继续本地退款
+            if ("ACQ.TRADE_NOT_EXIST".equals(response.getSubCode())) {
+                log.warn("支付宝交易不存在（订单号: {}），视为无真实交易，继续本地退款", orderNo);
+                return true;
+            }
+            log.error("支付宝退款失败，订单号: {}, code: {}, sub_code: {}, msg: {}",
+                    orderNo, response.getCode(), response.getSubCode(), response.getMsg());
+            return false;
         } catch (AlipayApiException e) {
             log.error("支付宝退款异常，订单号: {}", orderNo, e);
             throw new RuntimeException("支付宝退款请求失败: " + e.getErrMsg());

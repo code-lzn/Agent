@@ -90,6 +90,12 @@ public interface OrderService extends IService<Order> {
     void refundOrder(Long orderId, Long userId);
 
     /**
+     * 管理员退款：调用支付宝退款 + 置为已退款 + 释放座位。
+     * 不校验开场时间（管理员可退款），但校验退款时限。
+     */
+    void refundOrderAdmin(Long orderId);
+
+    /**
      * 释放已锁定的座位（无关联订单的锁定座位）。
      */
     int releaseOrphanLocks();
