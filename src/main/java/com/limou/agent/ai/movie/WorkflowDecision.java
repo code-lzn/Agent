@@ -27,6 +27,18 @@ public class WorkflowDecision implements Serializable {
     /** 用户消息（透传） */
     private String augmentedMessage;
 
+    /** Graph 模式: 识别的意图 */
+    private String intent;
+
+    /** Graph 模式: 工具执行结果 JSON */
+    private String toolResult;
+
+    /** Graph 模式: 工具名称 */
+    private String toolName;
+
+    /** Graph 模式: 会话状态 JSON（用于回复生成） */
+    private String stateJson;
+
     public static WorkflowDecision blocked(String message) {
         return WorkflowDecision.builder()
                 .blocked(true)

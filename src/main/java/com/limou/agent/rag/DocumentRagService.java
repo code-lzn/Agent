@@ -20,7 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
-@Service
+//@Service
 @Getter
 public class DocumentRagService {
 
@@ -37,7 +37,7 @@ public class DocumentRagService {
         this.resourcePatternResolver = resourcePatternResolver;
     }
 
-    @PostConstruct
+//    @PostConstruct
     public void init() {
         try {
             vectorStore = SimpleVectorStore.builder(embeddingModel).build();

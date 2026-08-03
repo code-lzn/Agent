@@ -60,7 +60,7 @@ public class MovieAgentController {
 //    }
 
     /**
-     * 电影票 Agent 流式对话（SSE）
+     * 电影票 Agent 流式对话（SSE）—— ReAct 模式，LLM 自主调用工具
      */
     @GetMapping(value = "/chat-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> doChatStream(
@@ -68,6 +68,18 @@ public class MovieAgentController {
             @RequestParam String conversationId,
             @RequestParam(required = false) Long userId) {
         return aiService.doMovieChatStream(message, conversationId, userId);
+    }
+
+    /**
+     * 电影票 Agent 智能路由流式对话（SSE）
+     * 自动判断：信息齐全 → ReAct 一句完成，信息不足 → Graph 逐步引导
+     */
+    @GetMapping(value = "/smart-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> doSmartStream(
+            @RequestParam String message,
+            @RequestParam String conversationId,
+            @RequestParam(required = false) Long userId) {
+        return aiService.doMovieSmartChatStream(message, conversationId, userId);
     }
 
     /**

@@ -44,6 +44,8 @@ body {
 .msg.user { align-self: flex-end; background: #0f3460; color: #e0e0e0; }
 .msg.ai { align-self: flex-start; background: #1a1a2e; color: #d0d0d0; border: 1px solid #2a2a4a; }
 .msg .label { font-size: 11px; color: #888; margin-bottom: 4px; }
+.tool-hint { color: #888; font-size: 12px; padding: 2px 0; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 .input-area {
   padding: 16px 20px; border-top: 1px solid #0f3460;
   display: flex; gap: 10px;
@@ -83,6 +85,11 @@ body {
     <input id="convId" value="test-session-1" style="flex:0.5">
     <label>User ID:</label>
     <input id="userId" type="number" value="1" style="flex:0.3">
+    <select id="mode" style="padding:2px 6px;border:1px solid #1a508b;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:12px;">
+      <option value="smart" selected>Smart</option>
+      <option value="react">ReAct</option>
+      <option value="graph">Graph</option>
+    </select>
     <button class="reset-btn" onclick="resetSession()">重置</button>
     <span style="color:#666;font-size:11px;margin-left:auto">端口: 8123</span>
   </div>
@@ -130,17 +137,33 @@ function send() {
 
   const aiDiv = appendMsg('ai', '<span class="typing">▍思考中...</span>');
   let fullText = '';
+  let toolHintEl = null;
 
   const conversationId = $('convId').value || 'test-session-1';
   const userId = $('userId').value || '1';
   const params = new URLSearchParams({ message, conversationId, userId });
-  const url = BASE + '/movie-agent/chat-stream?' + params;
+  const mode = ($('mode') && $('mode').value) || 'smart';
+const pathMap = { smart: '/movie-agent/smart-stream', react: '/movie-agent/chat-stream', graph: '/movie-graph/chat-stream' };
+const url = BASE + (pathMap[mode] || pathMap.smart) + '?' + params;
 
   const eventSource = new EventSource(url);
 
   eventSource.addEventListener('message', (e) => {
     try {
       const parsed = JSON.parse(e.data);
+      // 工具调用事件：显示为临时状态提示，不混入对话文本
+      if (parsed.type === 'tool_start') {
+        if (!toolHintEl) {
+          toolHintEl = document.createElement('div');
+          toolHintEl.className = 'tool-hint';
+          aiDiv.appendChild(toolHintEl);
+        }
+        toolHintEl.textContent = '⏳ ' + parsed.d;
+        $('chatArea').scrollTop = $('chatArea').scrollHeight;
+        return;
+      }
+      // 正常文本：先移除工具提示
+      if (toolHintEl) { toolHintEl.remove(); toolHintEl = null; }
       const chunk = parsed.d || '';
       fullText += chunk;
       aiDiv.innerHTML = '<div class="label">AI</div>' + escapeHtml(fullText) + '<span class="typing">▍</span>';
@@ -151,15 +174,16 @@ function send() {
   });
 
   eventSource.addEventListener('done', () => {
+    if (toolHintEl) { toolHintEl.remove(); toolHintEl = null; }
     aiDiv.innerHTML = '<div class="label">AI</div>' + escapeHtml(fullText);
     eventSource.close();
     setLoading(false);
   });
 
   eventSource.addEventListener('error', (e) => {
-    const remaining = fullText;
-    if (remaining) {
-      aiDiv.innerHTML = '<div class="label">AI</div>' + escapeHtml(remaining) + '\n\n<span style="color:#e74c3c">[连接断开]</span>';
+    if (toolHintEl) { toolHintEl.remove(); toolHintEl = null; }
+    if (fullText) {
+      aiDiv.innerHTML = '<div class="label">AI</div>' + escapeHtml(fullText) + '\n\n<span style="color:#e74c3c">[连接断开]</span>';
     } else {
       aiDiv.innerHTML = '<div class="label">AI</div><span style="color:#e74c3c">请求失败，请检查服务是否启动</span>';
     }

@@ -73,6 +73,46 @@ public class MovieStateManager {
     }
 
     /**
+     * 合并槽位到现有状态
+     * 将新的槽位数据合并到当前会话状态中，只覆盖非 null 字段
+     *
+     * @param conversationId 会话ID
+     * @param newSlots      新提取的槽位
+     * @return 合并后的状态
+     */
+    public ConversationState mergeState(String conversationId, ConversationState newSlots) {
+        ConversationState state = getState(conversationId);
+
+        if (newSlots == null) {
+            return state;
+        }
+
+        if (newSlots.getFilmId() != null) state.setFilmId(newSlots.getFilmId());
+        if (newSlots.getFilmName() != null) state.setFilmName(newSlots.getFilmName());
+        if (newSlots.getFilmType() != null) state.setFilmType(newSlots.getFilmType());
+        if (newSlots.getCinemaId() != null) state.setCinemaId(newSlots.getCinemaId());
+        if (newSlots.getCinemaName() != null) state.setCinemaName(newSlots.getCinemaName());
+        if (newSlots.getHallType() != null) state.setHallType(newSlots.getHallType());
+        if (newSlots.getShowDate() != null) state.setShowDate(newSlots.getShowDate());
+        if (newSlots.getStartTime() != null) state.setStartTime(newSlots.getStartTime());
+        if (newSlots.getScheduleId() != null) state.setScheduleId(newSlots.getScheduleId());
+        if (newSlots.getHallName() != null) state.setHallName(newSlots.getHallName());
+        if (newSlots.getTicketCount() != null) state.setTicketCount(newSlots.getTicketCount());
+        if (newSlots.getOrderId() != null) state.setOrderId(newSlots.getOrderId());
+        if (newSlots.getPreferredSeatZone() != null) state.setPreferredSeatZone(newSlots.getPreferredSeatZone());
+        if (newSlots.getUserId() != null) state.setUserId(newSlots.getUserId());
+        if (newSlots.getSeatIds() != null && !newSlots.getSeatIds().isEmpty()) {
+            state.setSeatIds(newSlots.getSeatIds());
+        }
+        if (newSlots.getSeatLabels() != null && !newSlots.getSeatLabels().isEmpty()) {
+            state.setSeatLabels(newSlots.getSeatLabels());
+        }
+
+        saveState(conversationId, state);
+        return state;
+    }
+
+    /**
      * 刷新状态 TTL（延长 30 分钟）
      */
     public void refreshTtl(String conversationId) {

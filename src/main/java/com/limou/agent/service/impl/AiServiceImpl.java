@@ -6,7 +6,12 @@ import com.limou.agent.ai.movie.MovieAgentWorkflow;
 import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.ai.movie.MovieToolManager;
 import com.limou.agent.ai.movie.WorkflowDecision;
+import com.limou.agent.ai.movie.graph.MovieGraphWorkflow;
+import com.limou.agent.ai.movie.graph.GraphResponseGenerator;
+import com.limou.agent.ai.movie.graph.SmartMovieRouter;
+import com.limou.agent.ai.movie.graph.RouterDecision;
 import com.limou.agent.model.entity.ChatHistory;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.service.AiService;
 import com.limou.agent.service.ChatHistoryService;
 import jakarta.annotation.Resource;
@@ -37,6 +42,15 @@ public class AiServiceImpl implements AiService {
 
     @Resource
     private MovieAgentWorkflow movieAgentWorkflow;
+
+    @Resource
+    private MovieGraphWorkflow movieGraphWorkflow;
+
+    @Resource
+    private GraphResponseGenerator graphResponseGenerator;
+
+    @Resource
+    private SmartMovieRouter smartMovieRouter;
 
     @Resource
     private ChatHistoryService chatHistoryService;
@@ -124,7 +138,7 @@ public class AiServiceImpl implements AiService {
         }
 
         // 2. ChatClient 流式 + 全量工具，Spring AI 内部处理多轮工具调用
-        //    工具调用时发射 tool_start 事件 → 前端显示"正在搜索影片..."
+        // 工具调用时发射 tool_start 事件 → 前端显示"正在搜索影片..."
         String prompt = getMovieSystemPrompt();
         StringBuilder fullResponse = new StringBuilder();
 
@@ -155,6 +169,118 @@ public class AiServiceImpl implements AiService {
                     saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
                     movieStateManager.refreshTtl(conversationId);
                 });
+    }
+
+    /** intent → 中文工具名映射 */
+    private static final Map<String, String> INTENT_TOOL_NAMES = Map.of(
+            "search_movie", "搜索影片",
+            "search_cinema", "搜索影院",
+            "search_schedule", "搜索场次",
+            "get_seat_map", "获取座位图",
+            "lock_seats", "锁定座位",
+            "create_order", "创建订单",
+            "pay_order", "支付订单",
+            "get_preference", "获取偏好");
+
+    @Override
+    public Flux<ServerSentEvent<String>> doMovieGraphChatStream(String message, String conversationId, Long userId) {
+        log.info("GraphWorkflow 流式对话: conversationId={}, userId={}", conversationId, userId);
+
+        // === 1. Graph 工作流: GuardRail → 意图识别 → 工具执行 ===
+        WorkflowDecision decision = movieGraphWorkflow.execute(message, conversationId, userId);
+
+        if (decision.isBlocked()) {
+            return Flux.just(
+                    ServerSentEvent.<String>builder()
+                            .data(JSONUtil.toJsonStr(Map.of("d", decision.getBlockMessage())))
+                            .build(),
+                    ServerSentEvent.<String>builder()
+                            .event("done")
+                            .data("")
+                            .build())
+                    .doFinally(signal -> movieStateManager.refreshTtl(conversationId));
+        }
+
+        // === 2. 准备流式回复 ===
+        String intent = decision.getIntent();
+        String toolResult = decision.getToolResult();
+        boolean hasTool = toolResult != null && !toolResult.isEmpty();
+
+        // 从 decision 中恢复状态（避免重复 getState）
+        ConversationState state = decision.getStateJson() != null
+                ? ConversationState.fromJson(decision.getStateJson())
+                : movieStateManager.getState(conversationId);
+
+        // 构建 prompt
+        String stateContext = state.toPromptContext();
+        String prompt = GraphResponseGenerator.RESPONSE_PROMPT
+                .replace("{intent}", intent != null ? intent : "chat")
+                .replace("{tool_result}", hasTool ? toolResult : "无工具结果")
+                .replace("{state}", stateContext)
+                .replace("{input}", message);
+
+        // 累积流式文本，用于正确保存历史
+        StringBuilder fullResponse = new StringBuilder();
+
+        // 构建 SSE 流
+        Flux<ServerSentEvent<String>> responseStream;
+
+        if (hasTool) {
+            String displayName = INTENT_TOOL_NAMES.getOrDefault(decision.getToolName(), decision.getToolName());
+            Flux<ServerSentEvent<String>> toolEvent = Flux.just(
+                    ServerSentEvent.<String>builder()
+                            .data(JSONUtil.toJsonStr(Map.of(
+                                    "d", "正在" + displayName + "...",
+                                    "type", "tool_start",
+                                    "toolName", decision.getToolName())))
+                            .build());
+            Flux<ServerSentEvent<String>> textStream = aiCodeGeneratorFactory
+                    .doSimpleChatStream(prompt, conversationId)
+                    .map(chunk -> {
+                        fullResponse.append(chunk);
+                        return ServerSentEvent.<String>builder()
+                                .data(JSONUtil.toJsonStr(Map.of("d", chunk)))
+                                .build();
+                    });
+            responseStream = toolEvent.concatWith(textStream);
+        } else {
+            responseStream = aiCodeGeneratorFactory
+                    .doSimpleChatStream(prompt, conversationId)
+                    .map(chunk -> {
+                        fullResponse.append(chunk);
+                        return ServerSentEvent.<String>builder()
+                                .data(JSONUtil.toJsonStr(Map.of("d", chunk)))
+                                .build();
+                    });
+        }
+
+        return responseStream
+                .concatWith(Mono.just(
+                        ServerSentEvent.<String>builder()
+                                .event("done")
+                                .data("")
+                                .build()))
+                .doFinally(signal -> {
+                    // 保存的是流式输出的真实内容，不是阻塞调用的结果
+                    saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
+                    movieStateManager.refreshTtl(conversationId);
+                });
+    }
+
+    @Override
+    public Flux<ServerSentEvent<String>> doMovieSmartChatStream(String message, String conversationId, Long userId) {
+        ConversationState state = movieStateManager.getState(conversationId);
+        if (userId != null) {
+            state.setUserId(userId);
+        }
+
+        RouterDecision decision = smartMovieRouter.route(message, state);
+        log.info("SmartRouter: decision={}, conversationId={}", decision, conversationId);
+
+        return switch (decision) {
+            case REACT -> doMovieChatStream(message, conversationId, userId);
+            case GRAPH -> doMovieGraphChatStream(message, conversationId, userId);
+        };
     }
 
     private void saveMovieChatHistory(String conversationId, Long userId, String userMessage, String aiResponse) {
