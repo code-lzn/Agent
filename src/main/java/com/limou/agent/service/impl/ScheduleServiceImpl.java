@@ -14,6 +14,7 @@ import com.limou.agent.model.vo.ScheduleVO;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.limou.agent.mapper.ScheduleMapper;
+import com.limou.agent.mapper.SeatMapper;
 import com.limou.agent.service.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -46,6 +47,9 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Autowired
     @Lazy
     private SeatService seatService;
+
+    @Autowired
+    private SeatMapper seatMapper;
 
     @Override
     public List<ScheduleVO> queryScheduleList(Long filmId, Long cinemaId, Date showDate) {
@@ -154,6 +158,10 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long saveScheduleWithSeats(Schedule schedule) {
+        // 0. 校验日期不能为过去 + 影院营业状态
+        checkShowDateNotPast(schedule.getShowDate());
+        checkCinemaOperable(schedule.getCinemaId());
+
         // 1. 保存排期
         boolean saved = super.save(schedule);
         if (!saved) {
@@ -166,9 +174,9 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
         }
 
-        // 3. 解析 seatTemplate 并初始化座位
+        // 3. 解析 seatTemplate 并初始化座位（多行插入，一次往返）
         HallLayout layout = parseHallLayout(hall);
-        seatService.saveBatch(buildSeats(schedule, hall.getId(), layout));
+        seatMapper.batchInsertSeats(buildSeats(schedule, hall.getId(), layout));
         return schedule.getId();
     }
 
@@ -179,12 +187,19 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             return 0;
         }
 
-        // 1. 先保存所有场次，拿到自增 ID（单事务，避免逐条提交）
+        // 0. 校验影院营业状态（去重检查）+ 日期不能为过去，先于保存，快速失败
+        Set<Long> checkedCinemas = new HashSet<>();
         for (Schedule s : scheduleList) {
-            boolean saved = super.save(s);
-            if (!saved) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "排期保存失败");
+            if (checkedCinemas.add(s.getCinemaId())) {
+                checkCinemaOperable(s.getCinemaId());
             }
+            checkShowDateNotPast(s.getShowDate());
+        }
+
+        // 1. 批量保存所有场次，拿到自增 ID（单事务 + 单批 SQL，避免逐条 INSERT 的网络往返）
+        boolean batchSaved = super.saveBatch(scheduleList);
+        if (!batchSaved) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "排期保存失败");
         }
 
         // 2. 按影厅一次性解析 seatTemplate（避免每条场次重复查厅/解析）
@@ -210,9 +225,45 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             allSeats.addAll(buildSeats(s, s.getHallId(), layout));
         }
 
-        // 4. 一次性批量插入所有座位
-        seatService.saveBatch(allSeats);
+        // 4. 一次性多行插入所有座位（单条 SQL、一次往返，避免逐行插入）
+        seatMapper.batchInsertSeats(allSeats);
         return scheduleList.size();
+    }
+
+    /**
+     * 校验影院营业状态：仅「营业中(published)」的影院允许新增场次。
+     */
+    private void checkCinemaOperable(Long cinemaId) {
+        if (cinemaId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "影院不能为空");
+        }
+        Cinema cinema = cinemaService.getById(cinemaId);
+        if (cinema == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "影院不存在");
+        }
+        if (!"published".equals(cinema.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "影院「" + cinema.getName() + "」当前" + cinemaStatusText(cinema.getStatus()) + "，无法新增场次");
+        }
+    }
+
+    private String cinemaStatusText(String status) {
+        if ("published".equals(status)) {
+            return "营业中";
+        }
+        if ("offline".equals(status)) {
+            return "已停业";
+        }
+        return "未营业";
+    }
+
+    /**
+     * 校验放映日期不能是过去（今天及以后才允许排片）。
+     */
+    private void checkShowDateNotPast(Date showDate) {
+        if (showDate != null && showDate.before(Date.valueOf(LocalDate.now()))) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "不能新增过去的场次");
+        }
     }
 
     /**
