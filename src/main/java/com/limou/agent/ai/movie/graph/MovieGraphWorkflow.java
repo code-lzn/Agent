@@ -66,6 +66,14 @@ public class MovieGraphWorkflow {
      * @return 工作流决策（含回复文本）
      */
     public WorkflowDecision execute(String message, String conversationId, Long userId) {
+        return execute(message, conversationId, userId, null);
+    }
+
+    /**
+     * 执行 Graph 工作流，并优先复用智能路由阶段的意图识别结果。
+     */
+    public WorkflowDecision execute(String message, String conversationId, Long userId,
+                                    GraphIntentResult preclassifiedIntent) {
         log.info("GraphWorkflow 开始: conversationId={}", conversationId);
 
         // === 1. GuardRail 安全检查 ===
@@ -82,7 +90,9 @@ public class MovieGraphWorkflow {
         }
 
         // === 3. LLM 意图识别 + 槽位提取 ===
-        GraphIntentResult intentResult = graphIntentClassifier.classify(message, state);
+        GraphIntentResult intentResult = preclassifiedIntent != null
+                ? preclassifiedIntent
+                : graphIntentClassifier.classify(message, state);
         String intent = intentResult.getIntent();
 
         // 合并槽位
@@ -141,23 +151,40 @@ public class MovieGraphWorkflow {
                     state.getFilmName(), state.getFilmType(), "rating_desc");
 
             case "search_cinema" -> searchCinemasTool.searchCinemas(
-                    state.getCinemaName(), null, state.getFilmId());
+                    state.getCinemaName(), state.getCurrentCity(), state.getFilmId());
 
             case "search_schedule" -> searchSchedulesTool.searchSchedules(
                     state.getFilmId(), state.getCinemaId(),
                     state.getShowDate(), state.getHallType());
 
-            case "get_seat_map" -> getSeatMapTool.getSeatMap(
-                    state.getScheduleId());
+            case "get_seat_map" -> {
+                if (state.getScheduleId() == null) {
+                    yield "{\"error\":\"请先选择场次\"}";
+                }
+                yield getSeatMapTool.getSeatMap(state.getScheduleId());
+            }
 
-            case "lock_seats" -> lockSeatsTool.lockSeats(
-                    state.getScheduleId(), state.getSeatIds());
+            case "lock_seats" -> {
+                if (state.getScheduleId() == null) {
+                    yield "{\"error\":\"请先选择场次\"}";
+                }
+                yield lockSeatsTool.lockSeats(state.getScheduleId(), state.getSeatIds());
+            }
 
-            case "create_order" -> createOrderTool.createOrder(
-                    state.getScheduleId(), state.getSeatIds(), state.getUserId());
+            case "create_order" -> {
+                if (state.getScheduleId() == null) {
+                    yield "{\"error\":\"请先选择场次\"}";
+                }
+                yield createOrderTool.createOrder(
+                        state.getScheduleId(), state.getSeatIds(), state.getUserId());
+            }
 
-            case "pay_order" -> payOrderTool.payOrder(
-                    state.getOrderId(), "wechat");
+            case "pay_order" -> {
+                if (state.getOrderId() == null) {
+                    yield "{\"error\":\"您还没有待支付的订单\"}";
+                }
+                yield payOrderTool.payOrder(state.getOrderId(), "alipay");
+            }
 
             case "get_preference" -> getUserPreferenceTool.getUserPreference(
                     state.getUserId());

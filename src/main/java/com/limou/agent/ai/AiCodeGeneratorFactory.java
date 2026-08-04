@@ -196,17 +196,31 @@ public class AiCodeGeneratorFactory {
         return Flux.merge(toolSink.asFlux(), chatStream);
     }
 
-    /** ToolCallback 包装器：在工具调用时向 Sink 发射 tool_start 事件 */
-    private record EventEmittingToolCallback(
-            ToolCallback delegate,
-            String displayName,
-            Sinks.Many<StreamChunk> sink) implements ToolCallback {
+    /** ToolCallback 包装器：在工具调用时向 Sink 发射 tool_start 事件，并兜底 JSON 解析异常 */
+    private static final class EventEmittingToolCallback implements ToolCallback {
+        private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(EventEmittingToolCallback.class);
+
+        private final ToolCallback delegate;
+        private final String displayName;
+        private final Sinks.Many<StreamChunk> sink;
+
+        EventEmittingToolCallback(ToolCallback delegate, String displayName, Sinks.Many<StreamChunk> sink) {
+            this.delegate = delegate;
+            this.displayName = displayName;
+            this.sink = sink;
+        }
 
         @Override
         public String call(String toolInput) {
             sink.tryEmitNext(StreamChunk.toolStart(
                     delegate.getToolDefinition().name(), displayName));
-            return delegate.call(toolInput);
+            try {
+                return delegate.call(toolInput);
+            } catch (Exception e) {
+                log.warn("工具调用参数解析失败: tool={}, error={}",
+                        delegate.getToolDefinition().name(), e.getMessage());
+                return "{\"error\":\"参数格式错误，请检查 JSON 格式后重试: " + e.getMessage() + "\"}";
+            }
         }
 
         @Override

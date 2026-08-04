@@ -3,17 +3,11 @@ package com.limou.agent.controller;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
 import com.mybatisflex.core.paginate.Page;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.limou.agent.model.entity.ChatSession;
 import com.limou.agent.service.ChatSessionService;
-import org.springframework.web.bind.annotation.RestController;
+
 import java.util.List;
 
 /**
@@ -91,6 +85,38 @@ public class ChatSessionController {
     @GetMapping("page")
     public Page<ChatSession> page(Page<ChatSession> page) {
         return chatSessionService.page(page);
+    }
+
+    /**
+     * 获取或创建当前用户的会话（点击 AI 时调用，有则复用）
+     */
+    @GetMapping("current")
+    public BaseResponse<ChatSession> getCurrentSession(@RequestParam Long userId) {
+        return ResultUtils.success(chatSessionService.getOrCreateCurrent(userId));
+    }
+
+    /**
+     * 强制创建新会话（点击"新对话"按钮时调用）
+     */
+    @PostMapping("create")
+    public BaseResponse<ChatSession> create(@RequestParam Long userId) {
+        return ResultUtils.success(chatSessionService.createNew(userId));
+    }
+
+    /**
+     * 查询用户的所有会话列表（历史记录）
+     */
+    @GetMapping("listByUser")
+    public BaseResponse<java.util.List<ChatSession>> listByUser(@RequestParam Long userId) {
+        return ResultUtils.success(chatSessionService.listByUser(userId));
+    }
+
+    /**
+     * 重命名会话
+     */
+    @PutMapping("rename")
+    public BaseResponse<Boolean> rename(@RequestParam Long id, @RequestParam String name) {
+        return ResultUtils.success(chatSessionService.rename(id, name));
     }
 
 }

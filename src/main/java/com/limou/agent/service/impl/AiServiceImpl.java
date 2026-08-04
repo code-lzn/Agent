@@ -8,8 +8,9 @@ import com.limou.agent.ai.movie.MovieToolManager;
 import com.limou.agent.ai.movie.WorkflowDecision;
 import com.limou.agent.ai.movie.graph.MovieGraphWorkflow;
 import com.limou.agent.ai.movie.graph.GraphResponseGenerator;
+import com.limou.agent.ai.movie.graph.GraphIntentResult;
 import com.limou.agent.ai.movie.graph.SmartMovieRouter;
-import com.limou.agent.ai.movie.graph.RouterDecision;
+import com.limou.agent.ai.movie.graph.SmartRouteResult;
 import com.limou.agent.model.entity.ChatHistory;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.service.AiService;
@@ -24,11 +25,11 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 @Slf4j
 @Service
@@ -120,6 +121,11 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public Flux<ServerSentEvent<String>> doMovieChatStream(String message, String conversationId, Long userId) {
+        return doMovieChatStream(message, conversationId, userId, null);
+    }
+
+    private Flux<ServerSentEvent<String>> doMovieChatStream(
+            String message, String conversationId, Long userId, String currentCity) {
         log.info("MovieAgent 流式对话: conversationId={}, userId={}", conversationId, userId);
 
         // 1. GuardRail 安全检查
@@ -139,7 +145,7 @@ public class AiServiceImpl implements AiService {
 
         // 2. ChatClient 流式 + 全量工具，Spring AI 内部处理多轮工具调用
         // 工具调用时发射 tool_start 事件 → 前端显示"正在搜索影片..."
-        String prompt = getMovieSystemPrompt();
+        String prompt = withCurrentCity(getMovieSystemPrompt(), currentCity);
         StringBuilder fullResponse = new StringBuilder();
 
         return aiCodeGeneratorFactory.doAgentChatStream(
@@ -165,6 +171,17 @@ public class AiServiceImpl implements AiService {
                                 .event("done")
                                 .data("")
                                 .build()))
+                .onErrorResume(e -> {
+                    log.error("ReAct SSE 流式输出异常: conversationId={}", conversationId, e);
+                    return Flux.just(
+                            ServerSentEvent.<String>builder()
+                                    .data(JSONUtil.toJsonStr(Map.of("d", "抱歉，出了一点问题：" + e.getMessage())))
+                                    .build(),
+                            ServerSentEvent.<String>builder()
+                                    .event("done")
+                                    .data("")
+                                    .build());
+                })
                 .doFinally(signal -> {
                     saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
                     movieStateManager.refreshTtl(conversationId);
@@ -184,10 +201,16 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public Flux<ServerSentEvent<String>> doMovieGraphChatStream(String message, String conversationId, Long userId) {
+        return doMovieGraphChatStream(message, conversationId, userId, null);
+    }
+
+    private Flux<ServerSentEvent<String>> doMovieGraphChatStream(
+            String message, String conversationId, Long userId, GraphIntentResult preclassifiedIntent) {
         log.info("GraphWorkflow 流式对话: conversationId={}, userId={}", conversationId, userId);
 
         // === 1. Graph 工作流: GuardRail → 意图识别 → 工具执行 ===
-        WorkflowDecision decision = movieGraphWorkflow.execute(message, conversationId, userId);
+        WorkflowDecision decision = movieGraphWorkflow.execute(
+                message, conversationId, userId, preclassifiedIntent);
 
         if (decision.isBlocked()) {
             return Flux.just(
@@ -260,6 +283,17 @@ public class AiServiceImpl implements AiService {
                                 .event("done")
                                 .data("")
                                 .build()))
+                .onErrorResume(e -> {
+                    log.error("Graph SSE 流式输出异常: conversationId={}", conversationId, e);
+                    return Flux.just(
+                            ServerSentEvent.<String>builder()
+                                    .data(JSONUtil.toJsonStr(Map.of("d", "抱歉，出了一点问题：" + e.getMessage())))
+                                    .build(),
+                            ServerSentEvent.<String>builder()
+                                    .event("done")
+                                    .data("")
+                                    .build());
+                })
                 .doFinally(signal -> {
                     // 保存的是流式输出的真实内容，不是阻塞调用的结果
                     saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
@@ -268,18 +302,49 @@ public class AiServiceImpl implements AiService {
     }
 
     @Override
-    public Flux<ServerSentEvent<String>> doMovieSmartChatStream(String message, String conversationId, Long userId) {
-        ConversationState state = movieStateManager.getState(conversationId);
-        if (userId != null) {
-            state.setUserId(userId);
-        }
+    public Flux<ServerSentEvent<String>> doMovieSmartChatStream(
+            String message, String conversationId, Long userId, String currentCity) {
+        String normalizedCity = normalizeCity(currentCity);
 
-        RouterDecision decision = smartMovieRouter.route(message, state);
-        log.info("SmartRouter: decision={}, conversationId={}", decision, conversationId);
+        ServerSentEvent<String> initialStatus = ServerSentEvent.<String>builder()
+                .data(JSONUtil.toJsonStr(Map.of(
+                        "d", "正在理解你的需求",
+                        "type", "status")))
+                .build();
 
-        return switch (decision) {
-            case REACT -> doMovieChatStream(message, conversationId, userId);
-            case GRAPH -> doMovieGraphChatStream(message, conversationId, userId);
+        Flux<ServerSentEvent<String>> routedStream = Mono.fromCallable(() -> {
+                    ConversationState state = movieStateManager.getState(conversationId);
+                    if (userId != null) state.setUserId(userId);
+                    if (normalizedCity != null) state.setCurrentCity(normalizedCity);
+                    movieStateManager.saveState(conversationId, state);
+                    return smartMovieRouter.route(message, state);
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMapMany(route -> routeStream(
+                        route, message, conversationId, userId, normalizedCity));
+
+        return Flux.concat(Flux.just(initialStatus), routedStream).onErrorResume(e -> {
+            log.error("SmartStream 异常: conversationId={}", conversationId, e);
+            return Flux.just(
+                    ServerSentEvent.<String>builder()
+                            .data(JSONUtil.toJsonStr(Map.of("d", "抱歉，出了一点问题：" + e.getMessage())))
+                            .build(),
+                    ServerSentEvent.<String>builder()
+                            .event("done")
+                            .data("")
+                            .build());
+        });
+    }
+
+    private Flux<ServerSentEvent<String>> routeStream(
+            SmartRouteResult route, String message, String conversationId,
+            Long userId, String currentCity) {
+        log.info("SmartRouter: decision={}, reusedIntent={}, conversationId={}",
+                route.decision(), route.intentResult() != null, conversationId);
+        return switch (route.decision()) {
+            case REACT -> doMovieChatStream(message, conversationId, userId, currentCity);
+            case GRAPH -> doMovieGraphChatStream(
+                    message, conversationId, userId, route.intentResult());
         };
     }
 
@@ -295,6 +360,20 @@ public class AiServiceImpl implements AiService {
         } catch (Exception e) {
             log.error("保存电影对话历史失败: conversationId={}", conversationId, e);
         }
+    }
+
+    private String normalizeCity(String city) {
+        if (city == null || city.isBlank() || "请选择城市".equals(city)) return null;
+        String normalized = city.trim();
+        return normalized.endsWith("市")
+                ? normalized.substring(0, normalized.length() - 1)
+                : normalized;
+    }
+
+    private String withCurrentCity(String prompt, String currentCity) {
+        if (currentCity == null) return prompt;
+        return prompt + "\n\n## 当前运行上下文\n用户当前城市：" + currentCity
+                + "。当用户提到附近、本地或就近时，优先使用该城市筛选影院。";
     }
 
     private String getMovieSystemPrompt() {

@@ -38,7 +38,7 @@ public class SearchCinemasTool extends BaseTool {
     public String searchCinemas(
             @ToolParam(description = "影院名称关键词（可选）") String keyword,
             @ToolParam(description = "城市（可选）") String city,
-            @ToolParam(description = "影片ID，传入则只返回有该片排片的影院（可选）") Long filmId
+            @ToolParam(description = "影片ID，传入则只返回有该片排片的影院（可选）", required = false) Long filmId
     ) {
         try {
             List<Cinema> cinemas;

@@ -62,6 +62,9 @@ public class ConversationState implements Serializable {
     /** 位置标签（公司附近/家附近等） */
     private String locationTag;
 
+    /** 前端定位或手动选择的当前城市 */
+    private String currentCity;
+
     /** 厅型偏好（IMAX/杜比/普通/4DX/VIP） */
     private String hallType;
 
@@ -183,6 +186,9 @@ public class ConversationState implements Serializable {
         }
         if (cinemaName != null) {
             sb.append("已选影院: ").append(cinemaName).append("\n");
+        }
+        if (currentCity != null) {
+            sb.append("当前城市: ").append(currentCity).append("\n");
         }
         if (showDate != null) {
             sb.append("日期: ").append(showDate);

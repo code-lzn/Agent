@@ -5,6 +5,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
@@ -45,9 +46,10 @@ public class MovieToolManager {
     @Resource
     private GetUserPreferenceTool getUserPreferenceTool;
 
-    @Resource
+    @Autowired(required = false)
     @Qualifier("mcpToolCallbacks")
     private ToolCallbackProvider mcpToolCallbackProvider;
+
     /**
      * 电影票 Agent 专用工具回调数组
      * 使用 @Qualifier("movieToolCallbacks") 注入到 MovieAgentFactory
@@ -62,8 +64,7 @@ public class MovieToolManager {
                 lockSeatsTool,
                 createOrderTool,
                 payOrderTool,
-                getUserPreferenceTool
-        );
+                getUserPreferenceTool);
 
         ToolCallback[] mcp = mcpToolCallbackProvider != null
                 ? mcpToolCallbackProvider.getToolCallbacks()

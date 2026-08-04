@@ -78,8 +78,9 @@ public class MovieAgentController {
     public Flux<ServerSentEvent<String>> doSmartStream(
             @RequestParam String message,
             @RequestParam String conversationId,
-            @RequestParam(required = false) Long userId) {
-        return aiService.doMovieSmartChatStream(message, conversationId, userId);
+            @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) String city) {
+        return aiService.doMovieSmartChatStream(message, conversationId, userId, city);
     }
 
     /**
