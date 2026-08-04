@@ -1,5 +1,7 @@
 package com.limou.agent.ai.movie.graph;
 
+import com.limou.agent.ai.movie.GuardRailResult;
+import com.limou.agent.ai.movie.MovieGuardRail;
 import com.limou.agent.model.dto.movie.ConversationState;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +24,8 @@ public class SmartMovieRouter {
     private static final Pattern BOOKING_KEYWORD = Pattern.compile("(订|买|购|下单|抢).*(票|座|位)");
     private static final Pattern MOVIE_NAME_HINT = Pattern.compile("《.+》|流浪地球|封神|哪吒|长安|万里|满江红|热辣|飞驰|人生|八角笼|孤注一掷|消失的她");
     private static final Pattern TIME_HINT = Pattern.compile("(今天|明天|后天|周[一二三四五六日]|上午|下午|晚上|凌晨|\\d+点|\\d+:\\d+)");
-    private static final Pattern CINEMA_HINT = Pattern.compile("(影院|影城|万达|CGV|金逸|中影|大地|博纳|卢米埃|百老汇|英皇|UA|离.{0,5}近|附近|旁边)");
+    private static final Pattern CINEMA_HINT = Pattern
+            .compile("(影院|影城|万达|CGV|金逸|中影|大地|博纳|卢米埃|百老汇|英皇|UA|离.{0,5}近|附近|旁边)");
     private static final Pattern GREETING_PATTERN = Pattern.compile("^(你好|hi|hello|嗨|在吗|在不在|嘿|哈喽|早上好|下午好|晚上好)[!！。.]*$");
     private static final Pattern CANCEL_PATTERN = Pattern.compile("(算了|不买了|取消|不要了|放弃|改天|下次)");
     private static final Pattern NEARBY_CINEMA_PATTERN = Pattern.compile(
@@ -33,6 +36,9 @@ public class SmartMovieRouter {
     @Resource
     private GraphIntentClassifier intentClassifier;
 
+    @Resource
+    private MovieGuardRail guardRail;
+
     /**
      * 路由决策
      *
@@ -41,6 +47,13 @@ public class SmartMovieRouter {
      * @return REACT 或 GRAPH
      */
     public SmartRouteResult route(String message, ConversationState state) {
+        // === GuardRail 安全检查（提前到路由层，避免下层重复执行） ===
+        GuardRailResult guardResult = guardRail.check(message);
+        if (!guardResult.allowed()) {
+            log.info("Router: GuardRail 拦截 → BLOCKED");
+            return SmartRouteResult.blocked(guardResult.message());
+        }
+
         // === 规则层（零延迟） ===
 
         if (matches(GREETING_PATTERN, message)) {
@@ -94,30 +107,46 @@ public class SmartMovieRouter {
      * 统计合并后总槽位数
      */
     private int countMergedSlots(ConversationState slots, ConversationState state) {
-        if (slots == null) return countStateSlots(state);
+        if (slots == null)
+            return countStateSlots(state);
         int count = 0;
-        if (has(slots.getFilmName()) || (state != null && has(state.getFilmName()))) count++;
-        if (has(slots.getCinemaName()) || (state != null && has(state.getCinemaName()))) count++;
+        if (has(slots.getFilmName()) || (state != null && has(state.getFilmName())))
+            count++;
+        if (has(slots.getCinemaName()) || (state != null && has(state.getCinemaName())))
+            count++;
         if (has(slots.getShowDate()) || has(slots.getStartTime())
-                || (state != null && (has(state.getShowDate()) || has(state.getStartTime())))) count++;
+                || (state != null && (has(state.getShowDate()) || has(state.getStartTime()))))
+            count++;
         if (slots.getTicketCount() != null && slots.getTicketCount() > 0
-                || (state != null && state.getTicketCount() != null && state.getTicketCount() > 0)) count++;
-        if (slots.getScheduleId() != null || (state != null && state.getScheduleId() != null)) count++;
-        if (has(slots.getHallType()) || (state != null && has(state.getHallType()))) count++;
-        if (has(slots.getPreferredSeatZone()) || (state != null && has(state.getPreferredSeatZone()))) count++;
+                || (state != null && state.getTicketCount() != null && state.getTicketCount() > 0))
+            count++;
+        if (slots.getScheduleId() != null || (state != null && state.getScheduleId() != null))
+            count++;
+        if (has(slots.getHallType()) || (state != null && has(state.getHallType())))
+            count++;
+        if (has(slots.getPreferredSeatZone()) || (state != null && has(state.getPreferredSeatZone())))
+            count++;
         return count;
     }
 
     private int countStateSlots(ConversationState state) {
-        if (state == null) return 0;
+        if (state == null)
+            return 0;
         int count = 0;
-        if (has(state.getFilmName())) count++;
-        if (has(state.getCinemaName())) count++;
-        if (has(state.getShowDate()) || has(state.getStartTime())) count++;
-        if (state.getTicketCount() != null && state.getTicketCount() > 0) count++;
-        if (state.getScheduleId() != null) count++;
-        if (has(state.getHallType())) count++;
-        if (has(state.getPreferredSeatZone())) count++;
+        if (has(state.getFilmName()))
+            count++;
+        if (has(state.getCinemaName()))
+            count++;
+        if (has(state.getShowDate()) || has(state.getStartTime()))
+            count++;
+        if (state.getTicketCount() != null && state.getTicketCount() > 0)
+            count++;
+        if (state.getScheduleId() != null)
+            count++;
+        if (has(state.getHallType()))
+            count++;
+        if (has(state.getPreferredSeatZone()))
+            count++;
         return count;
     }
 
@@ -128,6 +157,11 @@ public class SmartMovieRouter {
                 .build();
     }
 
-    private boolean has(String s) { return s != null && !s.isEmpty(); }
-    private boolean matches(Pattern p, String s) { return p.matcher(s).find(); }
+    private boolean has(String s) {
+        return s != null && !s.isEmpty();
+    }
+
+    private boolean matches(Pattern p, String s) {
+        return p.matcher(s).find();
+    }
 }

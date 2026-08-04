@@ -1,26 +1,48 @@
 package com.limou.agent.ai.movie.graph;
 
+import cn.hutool.json.JSONUtil;
+import com.limou.agent.ai.graph.CompiledGraph;
+import com.limou.agent.ai.graph.StateGraph;
 import com.limou.agent.ai.movie.*;
+import com.limou.agent.ai.movie.graph.nodes.*;
 import com.limou.agent.ai.movie.tools.*;
-import com.limou.agent.model.dto.movie.ConversationState;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 电影票 Agent StateGraph 工作流
- *
- * 架构: 代码控流程 + LLM 做意图/回复
- * 流程: GuardRail → 意图识别 → 工具路由 → 工具执行 → 回复生成
- *
- * 与 ReAct 模式的区别: LLM 不持有工具，由 Graph 根据意图精确路由到具体工具
+ * <p>
+ * 使用声明式图编排：定义节点 → 定义边 → 编译 → 执行。
+ * 架构: 代码控流程 + LLM 做意图/回复。
+ * <p>
+ * GuardRail 安全检查已提前到 SmartMovieRouter 层，图内不再重复检查。
+ * ConversationState 由 IntentClassifyNode 加载后挂到 graph state 上，
+ * 后续节点通过 state.getConvState() 透传获取，不再各自从 Redis 读取。
+ * <p>
+ * 图结构:
+ * <pre>
+ *   START → intent_classify ──┬── search_film ──── END
+ *                              ├── search_cinema ── END
+ *                              ├── search_schedule  END
+ *                              ├── get_seat_map ─── END
+ *                              ├── lock_seats ───── END
+ *                              ├── create_order ─── END
+ *                              ├── pay_order ────── END
+ *                              └── (default) ────── END
+ * </pre>
+ * <p>
+ * 与 ReAct 模式的区别: LLM 不持有工具，由 Graph 根据意图精确路由到具体工具。
  */
 @Slf4j
 @Component
 public class MovieGraphWorkflow {
 
-    @Resource
-    private MovieGuardRail movieGuardRail;
+    // ===== 基础设施 =====
 
     @Resource
     private MovieStateManager movieStateManager;
@@ -29,6 +51,7 @@ public class MovieGraphWorkflow {
     private GraphIntentClassifier graphIntentClassifier;
 
     // ===== 工具实例 =====
+
     @Resource
     private SearchFilmsTool searchFilmsTool;
 
@@ -50,146 +73,161 @@ public class MovieGraphWorkflow {
     @Resource
     private PayOrderTool payOrderTool;
 
-    @Resource
-    private GetUserPreferenceTool getUserPreferenceTool;
+    /** 编译后的图实例（单例，线程安全——每次 invoke 创建新 state） */
+    private CompiledGraph<MovieGraphState> graph;
+
+    /**
+     * 构建并编译图
+     */
+    @PostConstruct
+    public void init() {
+        graph = new StateGraph<MovieGraphState>()
+
+                // ==================== 节点 ====================
+                .addNode("intent_classify", new IntentClassifyNode(graphIntentClassifier, movieStateManager))
+                .addNode("search_film",     new SearchFilmNode(searchFilmsTool))
+                .addNode("search_cinema",   new SearchCinemaNode(searchCinemasTool))
+                .addNode("search_schedule", new SearchScheduleNode(searchSchedulesTool))
+                .addNode("get_seat_map",    new GetSeatMapNode(getSeatMapTool))
+                .addNode("lock_seats",      new LockSeatsNode(lockSeatsTool, movieStateManager))
+                .addNode("create_order",    new CreateOrderNode(createOrderTool, movieStateManager))
+                .addNode("pay_order",       new PayOrderNode(payOrderTool))
+
+                // ==================== 边 ====================
+
+                // 入口 → 意图识别（GuardRail 已在路由层完成，直接进入）
+                .addEdge(StateGraph.START, "intent_classify")
+
+                // 意图 → 工具（条件路由：根据 LLM 识别的意图分发到对应工具节点）
+                .addConditionalEdges("intent_classify",
+                        MovieGraphState::getIntent,
+                        Map.of(
+                                "search_movie",   "search_film",
+                                "search_cinema",  "search_cinema",
+                                "search_schedule","search_schedule",
+                                "get_seat_map",   "get_seat_map",
+                                "lock_seats",     "lock_seats",
+                                "create_order",   "create_order",
+                                "pay_order",      "pay_order"
+                        ),
+                        StateGraph.END  // greeting / chat / unknown → 直接 END
+                )
+
+                // 所有工具执行完 → END
+                .addEdge("search_film",    StateGraph.END)
+                .addEdge("search_cinema",  StateGraph.END)
+                .addEdge("search_schedule",StateGraph.END)
+                .addEdge("get_seat_map",   StateGraph.END)
+                .addEdge("lock_seats",     StateGraph.END)
+                .addEdge("create_order",   StateGraph.END)
+                .addEdge("pay_order",      StateGraph.END)
+
+                // ==================== 编译 ====================
+                .compile();
+
+        log.info("MovieGraphWorkflow 图编译完成，注册节点: {}",
+                graph.getNodes().keySet());
+    }
 
     /**
      * 执行 Graph 工作流
-     * 1. GuardRail 安全检查
-     * 2. LLM 意图识别 + 槽位提取
-     * 3. 代码根据意图精确路由到工具
-     * 4. LLM 生成自然语言回复
      *
      * @param message        用户输入
      * @param conversationId 会话ID
      * @param userId         用户ID
-     * @return 工作流决策（含回复文本）
+     * @return 工作流决策（含工具执行结果和会话状态）
      */
     public WorkflowDecision execute(String message, String conversationId, Long userId) {
         return execute(message, conversationId, userId, null);
     }
 
     /**
-     * 执行 Graph 工作流，并优先复用智能路由阶段的意图识别结果。
+     * 执行 Graph 工作流，并优先复用智能路由阶段的意图识别结果
+     *
+     * @param message              用户输入
+     * @param conversationId       会话ID
+     * @param userId               用户ID
+     * @param preclassifiedIntent  SmartRouter 的预分类结果（null 则走 LLM 分类）
+     * @return 工作流决策（含工具执行结果和会话状态）
      */
     public WorkflowDecision execute(String message, String conversationId, Long userId,
                                     GraphIntentResult preclassifiedIntent) {
-        log.info("GraphWorkflow 开始: conversationId={}", conversationId);
+        log.info("GraphWorkflow 开始: conversationId={}, hasPreclassified={}",
+                conversationId, preclassifiedIntent != null);
 
-        // === 1. GuardRail 安全检查 ===
-        GuardRailResult guardResult = movieGuardRail.check(message);
-        if (!guardResult.allowed()) {
-            log.warn("Graph GuardRail 拦截: {}", guardResult.message());
-            return WorkflowDecision.blocked(guardResult.message());
+        // 构建初始状态
+        MovieGraphState initialState = MovieGraphState.builder()
+                .userMessage(message)
+                .conversationId(conversationId)
+                .userId(userId)
+                .preclassifiedIntent(preclassifiedIntent)
+                .build();
+
+        // 执行图
+        MovieGraphState result;
+        try {
+            result = graph.invoke(initialState);
+        } catch (Exception e) {
+            log.error("Graph 执行异常: conversationId={}", conversationId, e);
+            return WorkflowDecision.blocked("系统异常，请稍后重试");
         }
 
-        // === 2. 加载会话状态 ===
-        ConversationState state = movieStateManager.getState(conversationId);
-        if (userId != null) {
-            state.setUserId(userId);
+        // 构造返回结果（保持与旧接口兼容）
+        String intent = result.getIntent();
+        String toolResult = result.getToolResult();
+        boolean hasTool = toolResult != null && !toolResult.isEmpty();
+
+        // 工具结果 → 卡片映射（前端渲染为可视化卡片，不显示原始 JSON）
+        String cardType = null;
+        Map<String, Object> cardData = null;
+        if (hasTool) {
+            cardType = cardTypeForIntent(intent);
+            cardData = parseCardData(toolResult);
         }
 
-        // === 3. LLM 意图识别 + 槽位提取 ===
-        GraphIntentResult intentResult = preclassifiedIntent != null
-                ? preclassifiedIntent
-                : graphIntentClassifier.classify(message, state);
-        String intent = intentResult.getIntent();
+        log.info("GraphWorkflow 完成: intent={}, hasToolResult={}, cardType={}, blocked={}",
+                intent, hasTool, cardType, result.isBlocked());
 
-        // 合并槽位
-        if (intentResult.getSlots() != null) {
-            state = movieStateManager.mergeState(conversationId, intentResult.getSlots());
-        }
-        movieStateManager.saveState(conversationId, state);
-
-        // === 4. 工具路由 + 执行 ===
-        String toolResult = "";
-        String toolName = intent;
-
-        if (isToolIntent(intent)) {
-            try {
-                toolResult = executeTool(intent, state);
-                log.info("Graph 工具执行完成: intent={}", intent);
-            } catch (Exception e) {
-                log.error("Graph 工具执行失败: intent={}", intent, e);
-                toolResult = "{\"error\":\"" + e.getMessage() + "\"}";
-            }
-        }
-
-        log.info("GraphWorkflow 完成: intent={}, hasToolResult={}", intent,
-                !toolResult.isEmpty());
-
-        // 回复生成移到上层，由流式调用完成，避免双重 LLM 调用
         return WorkflowDecision.builder()
-                .blocked(false)
+                .blocked(result.isBlocked())
+                .blockMessage(result.getBlockMessage())
                 .intent(intent)
                 .toolResult(toolResult)
-                .toolName(toolName)
-                .stateJson(state.toJson())
+                .toolName(result.getToolName())
+                .convState(result.getConvState())
+                .stateJson(result.getStateJson())
+                .cardType(cardType)
+                .cardData(cardData)
                 .build();
     }
 
-    /**
-     * 判断意图是否需要工具调用
-     */
-    private boolean isToolIntent(String intent) {
+    // ==================== 卡片映射 ====================
+
+    /** intent → 前端 cardType 映射 */
+    private static String cardTypeForIntent(String intent) {
+        if (intent == null) return null;
         return switch (intent) {
-            case "search_movie", "search_cinema", "search_schedule",
-                    "get_seat_map", "lock_seats", "create_order",
-                    "pay_order", "get_preference" ->
-                true;
-            default -> false;
+            case "search_movie"   -> "film_list";
+            case "search_cinema"  -> "cinema_list";
+            case "search_schedule"-> "schedule_list";
+            case "get_seat_map"   -> "seat_map";
+            case "lock_seats"     -> "seats_confirmed";
+            case "create_order"   -> "order_detail";
+            case "pay_order"      -> "payment_form";
+            default               -> null;
         };
     }
 
-    /**
-     * 根据意图精确调用对应工具
-     * 代码路由，不依赖 LLM 选择工具
-     */
-    private String executeTool(String intent, ConversationState state) {
-        return switch (intent) {
-            case "search_movie" -> searchFilmsTool.searchFilms(
-                    state.getFilmName(), state.getFilmType(), "rating_desc");
-
-            case "search_cinema" -> searchCinemasTool.searchCinemas(
-                    state.getCinemaName(), state.getCurrentCity(), state.getFilmId());
-
-            case "search_schedule" -> searchSchedulesTool.searchSchedules(
-                    state.getFilmId(), state.getCinemaId(),
-                    state.getShowDate(), state.getHallType());
-
-            case "get_seat_map" -> {
-                if (state.getScheduleId() == null) {
-                    yield "{\"error\":\"请先选择场次\"}";
-                }
-                yield getSeatMapTool.getSeatMap(state.getScheduleId());
-            }
-
-            case "lock_seats" -> {
-                if (state.getScheduleId() == null) {
-                    yield "{\"error\":\"请先选择场次\"}";
-                }
-                yield lockSeatsTool.lockSeats(state.getScheduleId(), state.getSeatIds());
-            }
-
-            case "create_order" -> {
-                if (state.getScheduleId() == null) {
-                    yield "{\"error\":\"请先选择场次\"}";
-                }
-                yield createOrderTool.createOrder(
-                        state.getScheduleId(), state.getSeatIds(), state.getUserId());
-            }
-
-            case "pay_order" -> {
-                if (state.getOrderId() == null) {
-                    yield "{\"error\":\"您还没有待支付的订单\"}";
-                }
-                yield payOrderTool.payOrder(state.getOrderId(), "alipay");
-            }
-
-            case "get_preference" -> getUserPreferenceTool.getUserPreference(
-                    state.getUserId());
-
-            default -> "{\"error\":\"未知意图: " + intent + "\"}";
-        };
+    /** 解析工具结果 JSON 为 Map（供前端卡片渲染） */
+    private static Map<String, Object> parseCardData(String toolResult) {
+        if (toolResult == null || toolResult.isBlank()) return null;
+        try {
+            // JSONObject extends HashMap, 直接 new LinkedHashMap 包装即可
+            return new LinkedHashMap<>(JSONUtil.parseObj(toolResult));
+        } catch (Exception e) {
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("raw", toolResult);
+            return fallback;
+        }
     }
 }

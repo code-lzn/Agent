@@ -2,9 +2,12 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.limou.agent.ai.movie.ConversationContext;
+import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.mapper.SeatMapper;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.Schedule;
 import com.limou.agent.model.entity.Seat;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -41,6 +44,9 @@ public class LockSeatsTool extends BaseTool {
 
     @Resource
     private ObjectMapper objectMapper;
+
+    @Resource
+    private MovieStateManager stateManager;
 
     @Tool(description = "锁定指定场次的座位。传入场次ID和座位ID数组。返回锁定结果JSON，成功则包含已锁座位信息和总价，失败则包含冲突座位和推荐替代")
     @Transactional(rollbackFor = Exception.class)
@@ -169,6 +175,20 @@ public class LockSeatsTool extends BaseTool {
                 result.put("count", lockedLabels.size());
                 result.put("totalPrice", totalPrice);
                 result.put("message", "太棒了！🎉 已为您锁定 " + String.join("、", lockedLabels));
+
+                // ReAct 模式下将 lockedSeatIds 写回 ConversationState（Graph 模式由 LockSeatsNode 处理）
+                String convId = ConversationContext.get();
+                if (convId != null) {
+                    try {
+                        List<Long> lockedIds = availableSeats.stream().map(Seat::getId).collect(Collectors.toList());
+                        ConversationState convState = stateManager.getState(convId);
+                        convState.setSeatIds(lockedIds);
+                        stateManager.saveState(convId, convState);
+                        log.info("lockSeats 写回 seatIds={} 到 Redis: conversationId={}", lockedIds, convId);
+                    } catch (Exception e) {
+                        log.warn("lockSeats 写回状态失败: conversationId={}", convId, e);
+                    }
+                }
 
                 log.info("lockSeats 成功: scheduleId={}, seats={}", scheduleId, lockedLabels);
                 return objectMapper.writeValueAsString(result);

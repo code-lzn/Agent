@@ -1,11 +1,13 @@
 package com.limou.agent.ai.movie;
 
+import com.limou.agent.model.dto.movie.ConversationState;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
+import java.util.Map;
 
 /**
  * 工作流决策结果
@@ -36,8 +38,17 @@ public class WorkflowDecision implements Serializable {
     /** Graph 模式: 工具名称 */
     private String toolName;
 
-    /** Graph 模式: 会话状态 JSON（用于回复生成） */
+    /** Graph 模式: 会话状态 JSON（兼容旧接口，新代码用 convState） */
     private String stateJson;
+
+    /** Graph 模式: 会话状态对象（直接透传，避免序列化绕圈） */
+    private ConversationState convState;
+
+    /** Graph 模式: 卡片类型（非 null 时前端渲染为卡片，不显示原始文本） */
+    private String cardType;
+
+    /** Graph 模式: 卡片数据（工具结果的结构化数据） */
+    private Map<String, Object> cardData;
 
     public static WorkflowDecision blocked(String message) {
         return WorkflowDecision.builder()

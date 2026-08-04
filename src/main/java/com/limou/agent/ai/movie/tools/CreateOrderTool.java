@@ -2,8 +2,11 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.limou.agent.ai.movie.ConversationContext;
+import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.*;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.*;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
@@ -38,6 +41,9 @@ public class CreateOrderTool extends BaseTool {
 
     @Resource
     private ScheduleMapper scheduleMapper;
+
+    @Resource
+    private MovieStateManager stateManager;
 
     @Resource
     private FilmMapper filmMapper;
@@ -154,6 +160,19 @@ public class CreateOrderTool extends BaseTool {
             result.put("message", "为您确认：" + order.getFilmName() + "×" + seatIds.size()
                     + "张，" + String.join("、", seatLabels)
                     + "，共 ¥" + totalPrice + "。没问题就下单啦～");
+
+            // ReAct 模式下将 orderId 写回 ConversationState（Graph 模式由 CreateOrderNode 处理）
+            String convId = ConversationContext.get();
+            if (convId != null) {
+                try {
+                    ConversationState convState = stateManager.getState(convId);
+                    convState.setOrderId(order.getId());
+                    stateManager.saveState(convId, convState);
+                    log.info("createOrder 写回 orderId={} 到 Redis: conversationId={}", order.getId(), convId);
+                } catch (Exception e) {
+                    log.warn("createOrder 写回状态失败: conversationId={}", convId, e);
+                }
+            }
 
             log.info("createOrder 成功: orderNo={}, film={}, seats={}, totalPrice={}",
                     orderNo, film != null ? film.getName() : "", seatLabels, totalPrice);
