@@ -1,6 +1,7 @@
 package com.limou.agent.service;
 
 import com.limou.agent.model.dto.schedule.ConflictCheckRequest;
+import com.limou.agent.model.entity.Film;
 import com.limou.agent.model.entity.Schedule;
 import com.limou.agent.model.vo.ScheduleVO;
 import com.mybatisflex.core.service.IService;
@@ -35,4 +36,6 @@ public interface ScheduleService extends IService<Schedule> {
      * @return 排期ID
      */
     Long saveScheduleWithSeats(Schedule schedule);
+    /** 影院当前热映影片 */
+    List<Film> getCinemaHotFilms(Long cinemaId);
 }

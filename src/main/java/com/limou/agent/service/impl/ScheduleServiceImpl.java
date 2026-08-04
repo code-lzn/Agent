@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.mapper.FilmMapper;
 import com.limou.agent.model.dto.schedule.ConflictCheckRequest;
 import com.limou.agent.model.entity.Cinema;
 import com.limou.agent.model.entity.Film;
@@ -15,6 +16,7 @@ import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.service.*;
+import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,8 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Autowired
     @Lazy
     private SeatService seatService;
+    @Resource
+    private FilmMapper filmMapper;
 
     @Override
     public List<ScheduleVO> queryScheduleList(Long filmId, Long cinemaId, Date showDate) {
@@ -216,4 +220,25 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         seatService.saveBatch(seats);
         return schedule.getId();
     }
+    @Override
+    public List<Film> getCinemaHotFilms(Long cinemaId) {
+        // 1. 查排片表中该影院的 filmId（去重）
+        List<Schedule> schedules = this.list(
+                QueryWrapper.create()
+                        .eq("cinemaId", cinemaId)
+                        .eq("status", "published")
+        );
+        if (CollUtil.isEmpty(schedules)) return new ArrayList<>();
+
+        Set<Long> filmIds = schedules.stream()
+                .map(Schedule::getFilmId)
+                .collect(Collectors.toSet());
+        // 2. 查 hot 影片
+        return filmMapper.selectListByQuery(
+                QueryWrapper.create()
+                        .in("id", filmIds)
+                        .eq("status", "hot")
+        );
+    }
+
 }
