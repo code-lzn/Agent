@@ -1,5 +1,7 @@
 package com.limou.agent.ai.movie.graph.nodes;
 
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.limou.agent.ai.graph.GraphNode;
 import com.limou.agent.ai.movie.graph.MovieGraphState;
 import com.limou.agent.ai.movie.graph.MovieIntent;
@@ -28,7 +30,10 @@ public class GetSeatMapNode implements GraphNode<MovieGraphState> {
         ConversationState convState = state.getConvState();
 
         if (convState.getScheduleId() == null) {
-            state.setToolResult("{\"error\":\"请先选择场次\"}");
+            JSONObject error = JSONUtil.createObj().set("error", "请先选择场次");
+            if (convState.getFilmId() != null) error.set("filmId", convState.getFilmId());
+            if (convState.getCinemaId() != null) error.set("cinemaId", convState.getCinemaId());
+            state.setToolResult(error.toString());
             state.setToolName(MovieIntent.GET_SEAT_MAP.getCode());
             return state;
         }

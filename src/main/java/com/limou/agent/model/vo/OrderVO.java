@@ -1,5 +1,7 @@
 package com.limou.agent.model.vo;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import lombok.Data;
 
 import java.io.Serial;
@@ -20,6 +22,7 @@ public class OrderVO implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
+    @JsonSerialize(using = ToStringSerializer.class)
     private Long id;
     private String orderNo;
     private Long userId;

@@ -36,7 +36,22 @@ public class CreateOrderNode implements GraphNode<MovieGraphState> {
         ConversationState convState = state.getConvState();
 
         if (convState.getScheduleId() == null) {
-            state.setToolResult("{\"error\":\"请先选择场次\"}");
+            JSONObject error = JSONUtil.createObj()
+                    .set("success", false)
+                    .set("error", "请先选择场次");
+            if (convState.getFilmId() != null) error.set("filmId", convState.getFilmId());
+            if (convState.getCinemaId() != null) error.set("cinemaId", convState.getCinemaId());
+            state.setToolResult(error.toString());
+            state.setToolName(MovieIntent.CREATE_ORDER.getCode());
+            return state;
+        }
+
+        if (convState.getSeatIds() == null || convState.getSeatIds().isEmpty()) {
+            state.setToolResult(JSONUtil.createObj()
+                    .set("success", false)
+                    .set("error", "请先选择并锁定座位")
+                    .set("scheduleId", convState.getScheduleId())
+                    .toString());
             state.setToolName(MovieIntent.CREATE_ORDER.getCode());
             return state;
         }
@@ -59,6 +74,9 @@ public class CreateOrderNode implements GraphNode<MovieGraphState> {
                     stateManager.saveState(state.getConversationId(), convState);
                     log.info("CreateOrder 写回 orderId={}: conversationId={}", orderId, state.getConversationId());
                 }
+            } else if (!json.containsKey("scheduleId")) {
+                json.set("scheduleId", convState.getScheduleId());
+                state.setToolResult(json.toString());
             }
         } catch (Exception e) {
             log.warn("CreateOrder 结果解析失败，跳过状态写回: conversationId={}", state.getConversationId(), e);

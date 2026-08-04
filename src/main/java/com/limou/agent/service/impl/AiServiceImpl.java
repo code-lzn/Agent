@@ -262,6 +262,7 @@ public class AiServiceImpl implements AiService {
         boolean hasTool = toolResult != null && !toolResult.isEmpty();
         String cardType = decision.getCardType();
         boolean hasCard = cardType != null && decision.getCardData() != null;
+        String cardError = hasCard ? extractCardError(decision.getCardData()) : null;
 
         ConversationState state = decision.getConvState() != null
                 ? decision.getConvState()
@@ -271,7 +272,10 @@ public class AiServiceImpl implements AiService {
         // 有卡片时 {tool_result} 替换为简短提示 + 强约束，避免 LLM 把原始 JSON 当文本输出
         String toolResultForPrompt;
         String antiJsonRule;
-        if (hasCard) {
+        if (cardError != null) {
+            toolResultForPrompt = "工具执行失败：" + cardError;
+            antiJsonRule = "\n\n## 重要规则\n工具执行失败。必须说明真实失败原因并引导用户重新选择，禁止声称卡片内容已经成功展示。不要输出JSON。";
+        } else if (hasCard) {
             toolResultForPrompt = "已通过前端卡片展示";
             antiJsonRule = "\n\n## 重要规则\n工具执行结果已通过可视化卡片在前端展示，你**不要**重复输出数据。\n**严禁**在回复中出现任何JSON代码块。只需要用自然语言组织回复即可。";
         } else {
@@ -343,7 +347,13 @@ public class AiServiceImpl implements AiService {
                                     .build());
                 })
                 .doFinally(signal -> {
-                    saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
+                    saveMovieChatHistory(
+                            conversationId,
+                            userId,
+                            message,
+                            fullResponse.toString(),
+                            cardType,
+                            decision.getCardData());
                     movieStateManager.refreshTtl(conversationId);
                 });
         });  // flatMapMany: offload Graph 阻塞调用到 boundedElastic
@@ -404,15 +414,43 @@ public class AiServiceImpl implements AiService {
 
     // ==================== 辅助方法 ====================
 
+    private String extractCardError(Map<String, Object> cardData) {
+        Object error = cardData.get("error");
+        return error != null && !error.toString().isBlank() ? error.toString() : null;
+    }
+
     private void saveMovieChatHistory(String conversationId, Long userId, String userMessage, String aiResponse) {
+        saveMovieChatHistory(conversationId, userId, userMessage, aiResponse, null, null);
+    }
+
+    private void saveMovieChatHistory(
+            String conversationId,
+            Long userId,
+            String userMessage,
+            String aiResponse,
+            String cardType,
+            Map<String, Object> cardData) {
         try {
             Long sessionId = Long.valueOf(conversationId);
             chatHistoryService.save(ChatHistory.builder()
                     .sessionId(sessionId).userId(userId)
                     .messageType("user").message(userMessage).build());
-            chatHistoryService.save(ChatHistory.builder()
-                    .sessionId(sessionId).userId(userId)
-                    .messageType("ai").message(aiResponse).build());
+
+            if (cardType != null && cardData != null) {
+                Map<String, Object> cardPayload = new LinkedHashMap<>();
+                cardPayload.put("type", "card");
+                cardPayload.put("cardType", cardType);
+                cardPayload.put("data", cardData);
+                chatHistoryService.save(ChatHistory.builder()
+                        .sessionId(sessionId).userId(userId)
+                        .messageType("card").message(JSONUtil.toJsonStr(cardPayload)).build());
+            }
+
+            if (aiResponse != null && !aiResponse.isBlank()) {
+                chatHistoryService.save(ChatHistory.builder()
+                        .sessionId(sessionId).userId(userId)
+                        .messageType("ai").message(aiResponse).build());
+            }
         } catch (Exception e) {
             log.error("保存电影对话历史失败: conversationId={}", conversationId, e);
         }

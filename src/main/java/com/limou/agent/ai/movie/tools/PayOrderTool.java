@@ -90,7 +90,7 @@ public class PayOrderTool extends BaseTool {
             // 4. 构建返回
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
-            result.put("orderId", orderId);
+            result.put("orderId", orderId.toString());
             result.put("orderNo", order.getOrderNo());
             result.put("payMethod", method);
             result.put("payForm", payForm);

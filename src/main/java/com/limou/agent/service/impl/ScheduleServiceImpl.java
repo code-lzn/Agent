@@ -49,19 +49,21 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
 
     @Override
     public List<ScheduleVO> queryScheduleList(Long filmId, Long cinemaId, Date showDate) {
-        if (filmId == null) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "影片ID不能为空");
+        if (filmId == null && cinemaId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "影片ID和影院ID不能同时为空");
         }
 
         Date queryDate = showDate != null ? showDate : Date.valueOf(LocalDate.now());
 
         QueryWrapper queryWrapper = QueryWrapper.create()
-                .eq("filmId", filmId)
                 .eq("status", "published")
                 .ge("showDate", queryDate)
                 .orderBy("showDate", true)
                 .orderBy("startTime", true);
 
+        if (filmId != null) {
+            queryWrapper.eq("filmId", filmId);
+        }
         if (cinemaId != null) {
             queryWrapper.eq("cinemaId", cinemaId);
         }

@@ -132,6 +132,9 @@ public class MovieStateManager {
             state.setOrderId(null);
         }
 
+        // 清理旧场次后恢复用户本轮明确指定的日期，供场次查询使用。
+        if (newSlots.getShowDate() != null) state.setShowDate(newSlots.getShowDate());
+
         // ── 场次级变更 ──
         if (newSlots.getScheduleId() != null && !newSlots.getScheduleId().equals(state.getScheduleId())) {
             state.setScheduleId(newSlots.getScheduleId());
