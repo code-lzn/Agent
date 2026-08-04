@@ -1,7 +1,10 @@
 package com.limou.agent.controller;
 
+import cn.hutool.core.lang.Validator;
+import cn.hutool.core.util.StrUtil;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
+import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.service.ScheduleService;
@@ -45,6 +48,8 @@ public class CinemaController {
      */
     @PostMapping("save")
     public BaseResponse<Boolean> save(@RequestBody Cinema cinema) {
+        ThrowUtils.throwIf(cinema == null, ErrorCode.PARAMS_ERROR, "参数为空");
+        checkCinemaPhone(cinema.getPhone());
         return ResultUtils.success(cinemaService.save(cinema));
     }
 
@@ -76,7 +81,23 @@ public class CinemaController {
      */
     @PutMapping("update")
     public BaseResponse<Boolean> update(@RequestBody Cinema cinema) {
+        ThrowUtils.throwIf(cinema == null, ErrorCode.PARAMS_ERROR, "参数为空");
+        checkCinemaPhone(cinema.getPhone());
         return ResultUtils.success(cinemaService.updateById(cinema));
+    }
+
+    /**
+     * 联系电话格式校验：手机号（如 13800138000）或带区号座机（如 020-88888888）。
+     * 空值放行（兼容历史数据），非空则必须格式正确。
+     */
+    private void checkCinemaPhone(String phone) {
+        if (StrUtil.isBlank(phone)) {
+            return;
+        }
+        if (!Validator.isMobile(phone) && !phone.matches("^0\\d{2,3}-?\\d{7,8}$")) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "联系电话格式不正确：手机号如 13800138000，座机需带区号如 020-88888888");
+        }
     }
 
     /**

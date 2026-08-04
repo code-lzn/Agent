@@ -68,11 +68,8 @@ public class ScheduleController {
     @PostMapping("/batchSave")
     public BaseResponse<Integer> batchSave(@RequestBody List<Schedule> scheduleList) {
         ThrowUtils.throwIf(CollUtil.isEmpty(scheduleList), ErrorCode.PARAMS_ERROR);
-        // 逐条保存并初始化座位
-        for (Schedule s : scheduleList) {
-            scheduleService.saveScheduleWithSeats(s);
-        }
-        return ResultUtils.success(scheduleList.size());
+        int count = scheduleService.batchSaveWithSeats(scheduleList);
+        return ResultUtils.success(count);
     }
 
     /**

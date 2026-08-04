@@ -38,4 +38,12 @@ public interface ScheduleService extends IService<Schedule> {
     Long saveScheduleWithSeats(Schedule schedule);
     /** 影院当前热映影片 */
     List<Film> getCinemaHotFilms(Long cinemaId);
+
+    /**
+     * 批量保存排期并一次性初始化座位（单事务，影厅模板只解析一次）。
+     *
+     * @param scheduleList 排期列表
+     * @return 成功创建的排期数量
+     */
+    int batchSaveWithSeats(List<Schedule> scheduleList);
 }

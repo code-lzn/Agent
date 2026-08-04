@@ -5,7 +5,6 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
@@ -167,7 +166,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .totalPrice(totalPrice)
                 .count(count)
                 .status("pending")
-                .expireAt(LocalDateTime.now().plusMinutes(15))
+                .expireAt(LocalDateTime.now().plusMinutes(getLockDuration()))
                 .build();
         this.save(order);
 
@@ -462,17 +461,31 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      * 读取可退款时限（小时），默认 24 小时。配置键：refundTimeoutHours
      */
     private int getRefundTimeoutHours() {
+        return readIntConfig("refundTimeoutHours", 24);
+    }
+
+    /**
+     * 读取锁座时长（分钟），即待支付订单超时时间，默认 15 分钟。配置键：lockDuration
+     */
+    private int getLockDuration() {
+        return readIntConfig("lockDuration", 15);
+    }
+
+    /**
+     * 读取整型系统配置。配置值可能是裸数字（如 20）或带引号的 JSON 数字，统一容错解析。
+     */
+    private int readIntConfig(String configKey, int defaultValue) {
         try {
             SystemConfig config = systemConfigService.getOne(
-                    QueryWrapper.create().eq("configKey", "refundTimeoutHours"));
+                    QueryWrapper.create().eq("configKey", configKey));
             if (config == null || StrUtil.isBlank(config.getConfigValue())) {
-                return 24;
+                return defaultValue;
             }
-            Object val = JSONUtil.parse(config.getConfigValue());
-            return val instanceof Number ? ((Number) val).intValue() : Integer.parseInt(val.toString());
+            String v = config.getConfigValue().trim().replaceAll("[\"']", "");
+            return Integer.parseInt(v);
         } catch (Exception e) {
-            log.warn("读取退款时限配置失败，使用默认 24 小时", e);
-            return 24;
+            log.warn("读取配置 {} 失败，使用默认 {}", configKey, defaultValue, e);
+            return defaultValue;
         }
     }
 

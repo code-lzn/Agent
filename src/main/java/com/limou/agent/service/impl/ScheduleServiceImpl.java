@@ -62,9 +62,15 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .eq("filmId", filmId)
                 .eq("status", "published")
-                .ge("showDate", queryDate)
                 .orderBy("showDate", true)
                 .orderBy("startTime", true);
+
+        // 指定日期 → 精确匹配当天（C端日期 Tab）；未指定 → 从今天起全部未来场次
+        if (showDate != null) {
+            queryWrapper.eq("showDate", queryDate);
+        } else {
+            queryWrapper.ge("showDate", queryDate);
+        }
 
         if (cinemaId != null) {
             queryWrapper.eq("cinemaId", cinemaId);
@@ -164,21 +170,81 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
         }
 
-        // 3. 解析 seatTemplate 获取 VIP 行配置和行列覆盖
+        // 3. 解析 seatTemplate 并初始化座位
+        HallLayout layout = parseHallLayout(hall);
+        seatService.saveBatch(buildSeats(schedule, hall.getId(), layout));
+        return schedule.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchSaveWithSeats(List<Schedule> scheduleList) {
+        if (CollUtil.isEmpty(scheduleList)) {
+            return 0;
+        }
+
+        // 1. 先保存所有场次，拿到自增 ID（单事务，避免逐条提交）
+        for (Schedule s : scheduleList) {
+            boolean saved = super.save(s);
+            if (!saved) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "排期保存失败");
+            }
+        }
+
+        // 2. 按影厅一次性解析 seatTemplate（避免每条场次重复查厅/解析）
+        Map<Long, HallLayout> layoutMap = new HashMap<>();
+        for (Schedule s : scheduleList) {
+            if (layoutMap.containsKey(s.getHallId())) {
+                continue;
+            }
+            Hall hall = hallService.getById(s.getHallId());
+            if (hall == null || hall.getRowCount() == null || hall.getColCount() == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
+            }
+            layoutMap.put(hall.getId(), parseHallLayout(hall));
+        }
+
+        // 3. 为所有场次生成座位
+        List<Seat> allSeats = new ArrayList<>();
+        for (Schedule s : scheduleList) {
+            HallLayout layout = layoutMap.get(s.getHallId());
+            if (layout == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
+            }
+            allSeats.addAll(buildSeats(s, s.getHallId(), layout));
+        }
+
+        // 4. 一次性批量插入所有座位
+        seatService.saveBatch(allSeats);
+        return scheduleList.size();
+    }
+
+    /**
+     * 影厅座位布局（从 seatTemplate 解析）。
+     */
+    private static class HallLayout {
+        int rowCount;
+        int colCount;
         Set<Integer> vipRows = new HashSet<>();
         Set<String> vipCells = new HashSet<>();
         Map<Integer, Integer> rowOverrides = new HashMap<>();
+    }
+
+    private HallLayout parseHallLayout(Hall hall) {
+        HallLayout layout = new HallLayout();
+        layout.rowCount = hall.getRowCount();
+        layout.colCount = hall.getColCount();
         if (cn.hutool.core.util.StrUtil.isNotBlank(hall.getSeatTemplate())) {
             try {
                 cn.hutool.json.JSONObject tmpl = new cn.hutool.json.JSONObject(hall.getSeatTemplate());
                 if (tmpl.containsKey("vipRows")) {
                     for (Object r : tmpl.getJSONArray("vipRows")) {
-                        vipRows.add((Integer) r);
+                        layout.vipRows.add((Integer) r);
                     }
                 }
                 if (tmpl.containsKey("vipCells")) {
                     for (Object c : tmpl.getJSONArray("vipCells")) {
-                        vipCells.add((String) c);
+                        layout.vipCells.add((String) c);
                     }
                 }
                 if (tmpl.containsKey("rowOverrides")) {
@@ -187,7 +253,7 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
                         try {
                             int r = Integer.parseInt(entry.getKey());
                             int c = ((Number) entry.getValue()).intValue();
-                            rowOverrides.put(r, c);
+                            layout.rowOverrides.put(r, c);
                         } catch (Exception ignored) {
                         }
                     }
@@ -195,30 +261,30 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             } catch (Exception ignored) {
             }
         }
+        return layout;
+    }
 
-        // 4. 批量初始化座位（支持逐行自定义列数）
+    private List<Seat> buildSeats(Schedule schedule, Long hallId, HallLayout layout) {
         List<Seat> seats = new ArrayList<>();
-        for (int row = 1; row <= hall.getRowCount(); row++) {
-            int rowCols = rowOverrides.getOrDefault(row, hall.getColCount());
+        for (int row = 1; row <= layout.rowCount; row++) {
+            int rowCols = layout.rowOverrides.getOrDefault(row, layout.colCount);
             for (int col = 1; col <= rowCols; col++) {
                 Seat seat = new Seat();
                 seat.setScheduleId(schedule.getId());
-                seat.setHallId(hall.getId());
+                seat.setHallId(hallId);
                 seat.setRowNum(row);
                 seat.setColNum(col);
                 seat.setSeatLabel(row + "排" + col + "座");
 
                 // 判断是否为 VIP 区
-                boolean isVip = vipRows.contains(row) || vipCells.contains(row + "," + col);
+                boolean isVip = layout.vipRows.contains(row) || layout.vipCells.contains(row + "," + col);
                 seat.setZone(isVip ? "vip" : "regular");
 
                 seat.setStatus("available");
                 seats.add(seat);
             }
         }
-
-        seatService.saveBatch(seats);
-        return schedule.getId();
+        return seats;
     }
     @Override
     public List<Film> getCinemaHotFilms(Long cinemaId) {
