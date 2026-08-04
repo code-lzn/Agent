@@ -6,6 +6,8 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
+import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.exception.ThrowUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +16,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -141,6 +147,100 @@ public class GeoController {
         Map<String, Object> result = unavailable("坐标解析失败，请稍后重试或手动选择城市");
         result.put("lat", lat);
         result.put("lng", lng);
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 高德 POI 关键词搜索（影院地址选择）。key 留在服务端，前端不接触。
+     */
+    @GetMapping("/place/search")
+    public BaseResponse<List<Map<String, Object>>> placeSearch(@RequestParam String keyword,
+                                                               @RequestParam(required = false) String city,
+                                                               @RequestParam(defaultValue = "1") int page,
+                                                               @RequestParam(defaultValue = "10") int pageSize) {
+        ThrowUtils.throwIf(StrUtil.isBlank(keyword), ErrorCode.PARAMS_ERROR, "请输入搜索关键词");
+        int offset = Math.min(Math.max(pageSize, 1), 20);
+        try {
+            String url = "https://restapi.amap.com/v3/place/text?keywords="
+                    + URLEncoder.encode(keyword, StandardCharsets.UTF_8)
+                    + "&offset=" + offset
+                    + "&page=" + Math.max(page, 1)
+                    + "&output=json"
+                    + "&key=" + amapWebServiceKey;
+            if (StrUtil.isNotBlank(city)) {
+                url += "&city=" + URLEncoder.encode(city, StandardCharsets.UTF_8);
+            }
+            String body = HttpUtil.get(url, 5000);
+            JSONObject json = JSONUtil.parseObj(body);
+            if (!"1".equals(json.getStr("status"))) {
+                log.warn("高德 POI 搜索失败: {}", truncate(body));
+                return ResultUtils.success(List.of());
+            }
+            List<Map<String, Object>> result = new ArrayList<>();
+            if (json.getJSONArray("pois") != null) {
+                for (Object obj : json.getJSONArray("pois")) {
+                    JSONObject poi = (JSONObject) obj;
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("name", poi.getStr("name"));
+                    item.put("address", poi.getStr("address"));
+                    item.put("city", poi.getStr("cityname"));
+                    item.put("district", poi.getStr("adname"));
+                    item.put("province", poi.getStr("pname"));
+                    item.put("adcode", poi.getStr("adcode"));
+                    String location = poi.getStr("location"); // 格式: 经度,纬度
+                    if (StrUtil.isNotBlank(location) && location.contains(",")) {
+                        String[] ll = location.split(",");
+                        item.put("longitude", Double.parseDouble(ll[0]));
+                        item.put("latitude", Double.parseDouble(ll[1]));
+                    }
+                    result.add(item);
+                }
+            }
+            return ResultUtils.success(result);
+        } catch (Exception e) {
+            log.warn("高德 POI 搜索异常: {}", e.getMessage());
+            return ResultUtils.success(List.of());
+        }
+    }
+
+    /**
+     * 地址反查坐标（B 端手动输入影院地址后获取经纬度）。
+     */
+    @GetMapping("/geocode")
+    public BaseResponse<Map<String, Object>> geocode(@RequestParam String address) {
+        ThrowUtils.throwIf(StrUtil.isBlank(address), ErrorCode.PARAMS_ERROR, "请输入地址");
+        try {
+            String url = "https://restapi.amap.com/v3/geocode/geo?address="
+                    + URLEncoder.encode(address, StandardCharsets.UTF_8)
+                    + "&output=json"
+                    + "&key=" + amapWebServiceKey;
+            String body = HttpUtil.get(url, 5000);
+            JSONObject json = JSONUtil.parseObj(body);
+            if ("1".equals(json.getStr("status")) && json.getJSONArray("geocodes") != null
+                    && !json.getJSONArray("geocodes").isEmpty()) {
+                JSONObject geo = json.getJSONArray("geocodes").getJSONObject(0);
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("found", true);
+                result.put("formattedAddress", geo.getStr("formatted_address"));
+                result.put("city", geo.getStr("city"));
+                result.put("district", geo.getStr("district"));
+                result.put("province", geo.getStr("province"));
+                result.put("adcode", geo.getStr("adcode"));
+                String location = geo.getStr("location"); // 格式: 经度,纬度
+                if (StrUtil.isNotBlank(location) && location.contains(",")) {
+                    String[] ll = location.split(",");
+                    result.put("longitude", Double.parseDouble(ll[0]));
+                    result.put("latitude", Double.parseDouble(ll[1]));
+                }
+                return ResultUtils.success(result);
+            }
+            log.warn("高德地址反查返回异常: {}", truncate(body));
+        } catch (Exception e) {
+            log.warn("高德地址反查异常: {}", e.getMessage());
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("found", false);
+        result.put("message", "地址解析失败，请尝试输入更详细的地址");
         return ResultUtils.success(result);
     }
 
