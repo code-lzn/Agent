@@ -29,7 +29,7 @@ import java.util.Map;
 @Slf4j
 public class GeoController {
 
-    @Value("${amap.web-service-key:74bfb724d417db45d5a9ffe7215eb4b1}")
+    @Value("${amap.web-service-key}")
     private String amapWebServiceKey;
 
     /**
@@ -209,6 +209,10 @@ public class GeoController {
         result.put("found", false);
         result.put("message", "地址解析失败，请尝试输入更详细的地址");
         return ResultUtils.success(result);
+    }
+
+    private String truncate(String body) {
+        return body != null && body.length() > 200 ? body.substring(0, 200) : body;
     }
 
     private String getClientIp(HttpServletRequest request) {
