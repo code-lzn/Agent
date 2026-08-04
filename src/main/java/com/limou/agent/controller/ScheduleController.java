@@ -5,6 +5,7 @@ import com.limou.agent.common.ResultUtils;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.model.dto.schedule.ConflictCheckRequest;
+import com.limou.agent.model.entity.Film;
 import com.limou.agent.model.vo.ScheduleVO;
 import cn.hutool.core.collection.CollUtil;
 import com.mybatisflex.core.paginate.Page;
@@ -121,5 +122,15 @@ public class ScheduleController {
     @GetMapping("listAll")
     public BaseResponse<List<Schedule>> listAll() {
         return ResultUtils.success(scheduleService.list());
+    }
+
+    /**
+     * 影院当前热映影片（有排片且状态为hot）
+     */
+    @GetMapping("/cinema-films")
+    public BaseResponse<List<Film>> cinemaFilms(@RequestParam Long cinemaId) {
+        ThrowUtils.throwIf(cinemaId == null || cinemaId <= 0, ErrorCode.PARAMS_ERROR);
+        List<Film> films = scheduleService.getCinemaHotFilms(cinemaId);
+        return ResultUtils.success(films);
     }
 }
