@@ -4,7 +4,10 @@ import com.limou.agent.ai.ratelimiter.annotation.RateLimit;
 import com.limou.agent.ai.ratelimiter.enums.RateLimitType;
 import com.limou.agent.model.dto.movie.MovieChatRequest;
 import com.limou.agent.ai.movie.MovieStateManager;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.limou.agent.ai.movie.tools.LockSeatsTool;
+import com.limou.agent.ai.movie.tools.PayOrderTool;
 import com.limou.agent.service.AiService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +33,9 @@ public class MovieAgentController {
 
     @Resource
     private LockSeatsTool lockSeatsTool;
+
+    @Resource
+    private PayOrderTool payOrderTool;
 
     /**
      * 电影票 Agent 对话（POST，支持 JSON 请求体）
@@ -81,6 +87,21 @@ public class MovieAgentController {
             @RequestParam(required = false) Long userId,
             @RequestParam(required = false) String city) {
         return aiService.doMovieSmartChatStream(message, conversationId, userId, city);
+    }
+
+    /**
+     * 支付宝支付页面（独立接口，不经过 SSE，避免大段 HTML 在流中传输异常）
+     */
+    @GetMapping(value = "/pay-form", produces = MediaType.TEXT_HTML_VALUE)
+    public String payForm(@RequestParam Long orderId) {
+        log.info("PayForm 请求: orderId={}", orderId);
+        String resultJson = payOrderTool.payOrder(orderId, "alipay");
+        JSONObject json = JSONUtil.parseObj(resultJson);
+        if (json.getBool("success", false)) {
+            return json.getStr("payForm");
+        }
+        String error = json.getStr("error", json.getStr("message", "支付异常"));
+        return "<html><body style=\"display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;\"><div style=\"text-align:center\"><h2>支付失败</h2><p>" + error + "</p></div></body></html>";
     }
 
     /**

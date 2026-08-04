@@ -145,7 +145,10 @@ public class AiServiceImpl implements AiService {
         }
 
         // ReactAgent 全量工具，多轮 ReAct 循环
-        String prompt = getMovieSystemPrompt();
+        String prompt = getMovieSystemPrompt()
+                + "\n\n## 当前用户\n"
+                + "当前登录用户ID: " + userId + "\n"
+                + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
         String response = aiCodeGeneratorFactory.doAgentChat(
                 message, conversationId, prompt, movieToolCallbacks, "movie-agent");
 
@@ -175,7 +178,10 @@ public class AiServiceImpl implements AiService {
         // 注入 conversationId 到 ThreadLocal，让工具方法能写回 ConversationState
         ConversationContext.set(conversationId);
 
-        String prompt = withCurrentCity(getMovieSystemPrompt(), currentCity);
+        String prompt = withCurrentCity(getMovieSystemPrompt(), currentCity)
+                + "\n\n## 当前用户\n"
+                + "当前登录用户ID: " + userId + "\n"
+                + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
         StringBuilder fullResponse = new StringBuilder();
 
         return aiCodeGeneratorFactory.doAgentChatStream(
