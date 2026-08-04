@@ -26,4 +26,12 @@ public interface UserPreferenceService extends IService<UserPreference> {
      * @return 是否成功
      */
     boolean saveOrUpdate(Long userId, UserPreference preference);
+
+    /**
+     * 重置（清空）用户偏好画像。PRD 3.3.5：支持一键重置。
+     *
+     * @param userId 用户ID
+     * @return 是否成功
+     */
+    boolean resetByUserId(Long userId);
 }

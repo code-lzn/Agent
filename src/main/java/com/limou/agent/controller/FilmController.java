@@ -1,5 +1,6 @@
 package com.limou.agent.controller;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
@@ -7,12 +8,16 @@ import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.model.dto.film.FilmQueryRequest;
+import com.limou.agent.service.ScheduleService;
 import com.mybatisflex.core.paginate.Page;
+import com.mybatisflex.core.query.QueryWrapper;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.limou.agent.model.entity.Film;
 import com.limou.agent.service.FilmService;
 import org.springframework.web.bind.annotation.RestController;
+import java.sql.Date;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -27,6 +32,9 @@ public class FilmController {
     @Autowired
     private FilmService filmService;
 
+    @Autowired
+    private ScheduleService scheduleService;
+
     // ========== 前台接口 ==========
 
     /**
@@ -35,7 +43,8 @@ public class FilmController {
     @GetMapping("/now-showing")
     public BaseResponse<List<Film>> nowShowing(@RequestParam(defaultValue = "8") int limit) {
         FilmQueryRequest req = new FilmQueryRequest();
-        req.setStatus("published");
+        // 热映区：正在上映(published) + 热映(hot)
+        req.setStatusList(List.of("published", "hot"));
         req.setPageNum(1);
         req.setPageSize(limit);
         req.setSortField("rating");
@@ -51,7 +60,8 @@ public class FilmController {
     public BaseResponse<List<Film>> recommended(@RequestParam(defaultValue = "4") int limit,
                                                  @RequestParam(required = false) String type) {
         FilmQueryRequest req = new FilmQueryRequest();
-        req.setStatus("published");
+        // 推荐：正在上映(published) + 热映(hot)
+        req.setStatusList(List.of("published", "hot"));
         req.setPageNum(1);
         req.setPageSize(limit);
         if (StrUtil.isNotBlank(type)) {
@@ -84,9 +94,10 @@ public class FilmController {
      */
     @GetMapping("/list")
     public BaseResponse<Page<Film>> listFilm(FilmQueryRequest filmQueryRequest) {
-        // 前台只查已发布的
-        if (filmQueryRequest.getStatus() == null) {
-            filmQueryRequest.setStatus("published");
+        // 前台默认查全部可上映影片：正在上映(published) + 热映(hot) + 准备上映(upcoming)
+        if (filmQueryRequest.getStatus() == null
+                && CollUtil.isEmpty(filmQueryRequest.getStatusList())) {
+            filmQueryRequest.setStatusList(List.of("published", "hot", "upcoming"));
         }
         Page<Film> filmPage = filmService.queryFilmPage(filmQueryRequest);
         return ResultUtils.success(filmPage);
@@ -123,8 +134,16 @@ public class FilmController {
      */
     @DeleteMapping("remove/{id}")
     public BaseResponse<Boolean> remove(@PathVariable Long id) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
+        // PRD 3.3.3.1 交互规则③：存在"有效"排片场次（今天及以后未放映）的影片禁止删除，仅允许下线
+        long scheduleCount = scheduleService.count(QueryWrapper.create()
+                .eq("filmId", id)
+                .ge("showDate", Date.valueOf(LocalDate.now())));
+        ThrowUtils.throwIf(scheduleCount > 0, ErrorCode.OPERATION_ERROR,
+                "该影片存在未放映的排片场次，禁止删除，请先下线");
         boolean result = filmService.removeById(id);
-        return ResultUtils.success(result);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
     }
 
     /**

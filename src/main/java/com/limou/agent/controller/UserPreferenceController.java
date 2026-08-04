@@ -1,7 +1,11 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.annotation.AuthCheck;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
+import com.limou.agent.constant.UserConstant;
+import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.model.entity.User;
 import com.limou.agent.service.UserService;
 import com.mybatisflex.core.paginate.Page;
@@ -36,6 +40,16 @@ public class UserPreferenceController {
     private UserService userService;
 
     /**
+     * 根据用户ID获取偏好（仅管理员）。PRD 3.3.5：查看用户偏好画像
+     */
+    @GetMapping("/byUser/{userId}")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<UserPreference> getByUser(@PathVariable Long userId) {
+        ThrowUtils.throwIf(userId == null || userId <= 0, ErrorCode.PARAMS_ERROR);
+        return ResultUtils.success(userPreferenceService.getByUserId(userId));
+    }
+
+    /**
      * 获取当前用户的偏好。
      */
     @GetMapping("/my")
@@ -65,6 +79,17 @@ public class UserPreferenceController {
     @PostMapping("save")
     public BaseResponse<Boolean> save(@RequestBody UserPreference userPreference) {
         return ResultUtils.success(userPreferenceService.save(userPreference));
+    }
+
+    /**
+     * 重置（清空）指定用户的偏好画像（仅管理员）。PRD 3.3.5
+     */
+    @PostMapping("/reset/{userId}")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> resetByUser(@PathVariable Long userId) {
+        ThrowUtils.throwIf(userId == null || userId <= 0, ErrorCode.PARAMS_ERROR);
+        boolean result = userPreferenceService.resetByUserId(userId);
+        return ResultUtils.success(result);
     }
 
     /**

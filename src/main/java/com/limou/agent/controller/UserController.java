@@ -256,4 +256,41 @@ public class UserController {
         return ResultUtils.success(userService.weixinLogin(openid, request));
     }
 
+    /**
+     * 冻结 / 解冻账号（仅管理员）。status：0 正常 / 1 冻结
+     * PRD 3.3.5：冻结后 C 端无法登录、无法发起购票
+     */
+    @PostMapping("/admin/freeze")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> freezeUser(@RequestParam("id") Long id,
+                                            @RequestParam("status") Integer status) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(status == null || (status != 0 && status != 1),
+                ErrorCode.PARAMS_ERROR, "状态只能为 0（正常）或 1（冻结）");
+        User user = userService.getById(id);
+        ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        // 管理员账号不允许被冻结
+        ThrowUtils.throwIf(UserConstant.ADMIN_ROLE.equals(user.getUserRole()) && status == 1,
+                ErrorCode.OPERATION_ERROR, "管理员账号不允许冻结");
+        user.setUserStatus(status);
+        boolean result = userService.updateById(user);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 后台 - 重置用户密码（恢复为默认 12345678）。仅管理员。PRD 3.3.5
+     */
+    @PostMapping("/admin/reset-password")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> adminResetPassword(@RequestParam("id") Long id) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
+        User user = userService.getById(id);
+        ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        user.setUserPassword(userService.encryptPassword("12345678"));
+        boolean result = userService.updateById(user);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
+    }
+
 }
