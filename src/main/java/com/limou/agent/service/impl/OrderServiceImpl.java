@@ -66,6 +66,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Autowired
     private SeatLockService seatLockService;
 
+    @Autowired
+    private TicketService ticketService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean lockSeat(LockSeatRequest request, Long userId) {
@@ -166,6 +169,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             orderSeatService.saveBatch(orderSeats);
             // 座位状态已由 lockSeats 置为 locked，无需重复更新
 
+            // 8. 每座位生成一张票（独立 8 位取票码，可分次核销）
+            ticketService.createTickets(order.getId(), schedule.getId(), seats);
+
             log.info("用户 {} 创建订单 {}，座位: {}", userId, orderNo,
                     seats.stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
 
@@ -225,6 +231,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         OrderVO vo = buildOrderVO(order, null);
         vo.setSeatLabels(seatLabels);
+        // 每张票（独立取票码 + 动态核销状态）
+        vo.setTickets(ticketService.getTicketsByOrder(orderId));
         return vo;
     }
 
@@ -243,6 +251,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     List<OrderSeat> orderSeats = orderSeatService.list(sqw);
                     OrderVO vo = buildOrderVO(order, null);
                     vo.setSeatLabels(orderSeats.stream().map(OrderSeat::getSeatLabel).collect(Collectors.toList()));
+                    // 每张票（含核销状态），前端据此隐藏/禁用退款入口
+                    vo.setTickets(ticketService.getTicketsByOrder(order.getId()));
                     return vo;
                 })
                 .collect(Collectors.toList());
@@ -341,6 +351,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if ("refunded".equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已退款，不可重复操作");
         }
+        // 核销拦截：有任一票已核销使用 → 整单禁止退款
+        if (ticketService.hasUsedTicket(orderId)) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "有票已核销使用，无法退款");
+        }
         try {
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
@@ -362,6 +376,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         order.setRefundAmount(order.getTotalPrice());
         order.setRefundTime(LocalDateTime.now());
         this.updateById(order);
+        // 未核销的票置为已退票
+        ticketService.markRefunded(orderId);
 
         QueryWrapper sqw = QueryWrapper.create().eq("orderId", orderId);
         List<OrderSeat> orderSeats = orderSeatService.list(sqw);
@@ -402,6 +418,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 throw new BusinessException(ErrorCode.OPERATION_ERROR,
                         "已超出可退款时限（" + refundHours + " 小时），无法退款");
             }
+            // 核销拦截：有任一票已核销使用 → 整单禁止退款
+            if (ticketService.hasUsedTicket(orderId)) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "有票已核销使用，无法退款");
+            }
         }
 
         if ("paid".equals(order.getStatus())) {
@@ -413,6 +433,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             order.setStatus("refunded");
             order.setRefundAmount(order.getTotalPrice());
             order.setRefundTime(LocalDateTime.now());
+            // 未核销的票置为已退票
+            ticketService.markRefunded(orderId);
         } else {
             order.setStatus("cancelled");
         }
@@ -437,6 +459,20 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 查找被锁定但没有关联订单的座位（超过30分钟前的锁定）
         // 简化实现：直接通过定时任务处理
         return 0;
+    }
+
+    /**
+     * 管理端订单列表：填充「是否有已核销票」标记（用于控制退款入口显示）。
+     */
+    public void fillCheckedStatus(List<Order> orders) {
+        if (CollUtil.isEmpty(orders)) {
+            return;
+        }
+        Set<Long> checkedIds = ticketService.getCheckedOrderIds(
+                orders.stream().map(Order::getId).collect(Collectors.toList()));
+        for (Order order : orders) {
+            order.setHasCheckedTicket(checkedIds.contains(order.getId()));
+        }
     }
 
     /**

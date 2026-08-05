@@ -134,6 +134,8 @@ public class OrderController {
                 .like("hallName", hallName, cn.hutool.core.util.StrUtil.isNotBlank(hallName))
                 .orderBy("createTime", false);
         Page<Order> orderPage = orderService.page(Page.of(pageNum, pageSize), qw);
+        // 填充「是否有已核销票」，前端据此隐藏/禁用退款入口
+        orderService.fillCheckedStatus(orderPage.getRecords());
         return ResultUtils.success(orderPage);
     }
 

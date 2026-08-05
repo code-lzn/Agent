@@ -49,4 +49,9 @@ public class OrderVO implements Serializable {
      * 座位标签列表（如：["5排6座", "5排7座"]）
      */
     private List<String> seatLabels;
+
+    /**
+     * 订单内的票列表（每座位一票，含独立取票码/核销状态）
+     */
+    private List<TicketVO> tickets;
 }

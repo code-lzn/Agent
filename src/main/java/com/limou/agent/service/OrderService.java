@@ -9,6 +9,8 @@ import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.service.IService;
 import com.limou.agent.model.entity.Order;
 
+import java.util.List;
+
 /**
  * 订单 服务层。
  *
@@ -93,4 +95,11 @@ public interface OrderService extends IService<Order> {
      * 释放已锁定的座位（无关联订单的锁定座位）。
      */
     int releaseOrphanLocks();
+
+    /**
+     * 管理端订单列表：填充「是否有已核销票」标记（用于控制退款入口显示）。
+     *
+     * @param orders 订单列表（原地修改）
+     */
+    void fillCheckedStatus(List<Order> orders);
 }
