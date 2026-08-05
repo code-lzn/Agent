@@ -121,14 +121,36 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             catch (Exception ignored) { /* 解析失败跳过 */ }
         }
 
-        // 2. 锁座（Redis 锁 + 乐观锁，替代 FOR UPDATE 行锁）
-        SeatLockResult lockResult = seatLockService.lockSeats(
-                request.getScheduleId(), request.getSeatIds(), getLockDuration());
-        if (!lockResult.isSuccess()) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR,
-                    "座位已被占用：" + formatLockError(lockResult));
+        // 2. 查询当前座位状态，区分预锁（前端已调 /order/lockSeat）和直接创建
+        List<Seat> currentSeats = seatService.listByIds(request.getSeatIds());
+        if (currentSeats.size() != request.getSeatIds().size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "部分座位不存在");
         }
-        List<Seat> seats = lockResult.getLockedSeats();
+        boolean anyUnavailable = currentSeats.stream()
+                .anyMatch(s -> !"locked".equals(s.getStatus()) && !"available".equals(s.getStatus()));
+        if (anyUnavailable) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "座位已被占用，请重新选座");
+        }
+        boolean allLocked = currentSeats.stream().allMatch(s -> "locked".equals(s.getStatus()));
+
+        List<Seat> seats;
+        if (allLocked) {
+            // 前端已预锁，直接复用，但需拿 Redis 锁防止并发冲突
+            for (Seat seat : currentSeats) {
+                if (!seat.getScheduleId().equals(request.getScheduleId())) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "座位不属于该场次");
+                }
+            }
+            seats = currentSeats;
+        } else {
+            SeatLockResult lockResult = seatLockService.lockSeats(
+                    request.getScheduleId(), request.getSeatIds(), getLockDuration());
+            if (!lockResult.isSuccess()) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                        "座位已被占用：" + formatLockError(lockResult));
+            }
+            seats = lockResult.getLockedSeats();
+        }
 
         try {
             // 3. 计算总价
