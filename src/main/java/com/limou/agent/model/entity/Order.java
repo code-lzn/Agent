@@ -90,7 +90,7 @@ public class Order implements Serializable {
     private Integer count;
 
     /**
-     * 状态: pending/paid/cancelled/completed
+     * 状态: pending/paid/cancelled/refunded/completed
      */
     private String status;
 
