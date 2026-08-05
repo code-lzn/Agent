@@ -56,6 +56,16 @@ public class OrderController {
     }
 
     /**
+     * 释放已锁定的座位（用户取消选座时调用）。
+     */
+    @PostMapping("/unlockSeat")
+    public BaseResponse<Boolean> unlockSeat(@RequestBody LockSeatRequest request, HttpServletRequest httpRequest) {
+        Long userId = getLoginUserId(httpRequest);
+        orderService.unlockSeat(request.getScheduleId(), request.getSeatIds(), userId);
+        return ResultUtils.success(true);
+    }
+
+    /**
      * 创建订单。
      */
     @PostMapping("/create")
