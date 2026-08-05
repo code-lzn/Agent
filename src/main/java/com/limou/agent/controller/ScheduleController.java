@@ -36,10 +36,11 @@ public class ScheduleController {
      */
     @GetMapping("/list")
     public BaseResponse<List<ScheduleVO>> listSchedule(
-            @RequestParam Long filmId,
+            @RequestParam(required = false) Long filmId,
             @RequestParam(required = false) Long cinemaId,
             @RequestParam(required = false) Date showDate) {
-        ThrowUtils.throwIf(filmId == null, ErrorCode.PARAMS_ERROR, "影片ID不能为空");
+        ThrowUtils.throwIf(filmId == null && cinemaId == null,
+                ErrorCode.PARAMS_ERROR, "影片ID和影院ID不能同时为空");
         List<ScheduleVO> list = scheduleService.queryScheduleList(filmId, cinemaId, showDate);
         return ResultUtils.success(list);
     }

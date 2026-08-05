@@ -48,6 +48,7 @@ public class AlipayController {
      * 浏览器直接打开即可跳转支付宝沙箱收银台。
      * 用法：http://localhost:8123/api/payment/alipay/pay?orderId=xxx
      */
+
     @GetMapping(value = "/pay", produces = "text/html;charset=UTF-8")
     public String payPage(@RequestParam Long orderId) {
         Order order = orderService.getById(orderId);

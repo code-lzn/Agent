@@ -28,6 +28,7 @@ import java.util.Map;
 public class ConversationState implements Serializable {
 
     private static final long serialVersionUID = 1L;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     /** 会话ID */
     private String conversationId;
@@ -152,7 +153,7 @@ public class ConversationState implements Serializable {
      */
     public String toJson() {
         try {
-            return new ObjectMapper().writeValueAsString(this);
+            return OBJECT_MAPPER.writeValueAsString(this);
         } catch (JsonProcessingException e) {
             return "{}";
         }
@@ -163,7 +164,11 @@ public class ConversationState implements Serializable {
      */
     public static ConversationState fromJson(String json) {
         try {
-            return new ObjectMapper().readValue(json, ConversationState.class);
+            ConversationState state = OBJECT_MAPPER.readValue(json, ConversationState.class);
+            if (state.completedSteps == null) state.completedSteps = new ArrayList<>();
+            if (state.seatIds == null) state.seatIds = new ArrayList<>();
+            if (state.seatLabels == null) state.seatLabels = new ArrayList<>();
+            return state;
         } catch (JsonProcessingException e) {
             return new ConversationState();
         }
@@ -201,7 +206,7 @@ public class ConversationState implements Serializable {
         if (scheduleId != null && hallName != null) {
             sb.append("已选场次: ").append(hallName).append("\n");
         }
-        if (!seatLabels.isEmpty()) {
+        if (seatLabels != null && !seatLabels.isEmpty()) {
             sb.append("已选座位: ").append(String.join("、", seatLabels)).append("\n");
         }
         if (totalPrice != null) {

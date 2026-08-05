@@ -7,6 +7,8 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
+import org.springframework.ai.deepseek.api.ResponseFormat;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -74,12 +76,12 @@ public class GraphIntentClassifier {
         String prompt = INTENT_PROMPT
                 .replace("{state}", stateContext)
                 .replace("{input}", userMessage);
-
+        //todo 结构化输出优化
         try {
             String raw = ChatClient.builder(chatModel).build()
                     .prompt().user(prompt).call().content();
 
-            String json = cleanJson(raw);
+            String json = cleanJson(raw);//json解析
             Map<String, Object> result = objectMapper.readValue(json,
                     new TypeReference<Map<String, Object>>() {
                     });

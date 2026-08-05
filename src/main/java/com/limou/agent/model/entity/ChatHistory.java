@@ -42,7 +42,7 @@ public class ChatHistory implements Serializable {
     private String message;
 
     /**
-     * user/ai
+     * user/ai/card
      */
     @Column("messageType")
     private String messageType;

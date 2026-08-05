@@ -112,7 +112,8 @@ public class ChatHistoryController {
     public BaseResponse<List<ChatHistory>> listBySession(@PathVariable Long sessionId) {
         QueryWrapper queryWrapper = QueryWrapper.create()
                 .eq("sessionId", sessionId)
-                .orderBy("createTime", true);
+                .orderBy("createTime", true)
+                .orderBy("id", true);
         return ResultUtils.success(chatHistoryService.list(queryWrapper));
     }
 

@@ -14,17 +14,17 @@ import reactor.core.publisher.Flux;
 @RequestMapping("/ai")
 public class AiController {
 
-    @Resource
-    private AiService aiService;
+//    @Resource
+//    private AiService aiService;
 
-    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
-    public String doChat(String message, String conversationId) {
-        return aiService.doChat(message, conversationId);
-    }
-
-    @GetMapping(value = "/chat-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> doChatStream(String message, String conversationId) {
-        return aiService.doChatStream(message, conversationId);
-    }
+//    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
+//    public String doChat(String message, String conversationId) {
+//        return aiService.doChat(message, conversationId);
+//    }
+//
+//    @GetMapping(value = "/chat-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+//    public Flux<String> doChatStream(String message, String conversationId) {
+//        return aiService.doChatStream(message, conversationId);
+//    }
 }
