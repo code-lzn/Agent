@@ -238,6 +238,7 @@ public class AiCodeGeneratorFactory {
                 case "searchFilms"      -> "film_list";
                 case "searchCinemas"    -> "cinema_list";
                 case "searchSchedules"  -> "schedule_list";
+                case "searchNearbyCinemas" -> "cinema_list";
                 case "getSeatMap"       -> "seat_map";
                 case "lockSeats"        -> success ? "seats_confirmed" : "seat_alternatives";
                 case "createOrder"      -> success ? "order_detail" : null;

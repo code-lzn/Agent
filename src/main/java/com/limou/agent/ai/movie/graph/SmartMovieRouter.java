@@ -72,8 +72,8 @@ public class SmartMovieRouter {
         }
 
         if (matches(NEARBY_CINEMA_PATTERN, message)) {
-            log.info("Router: 规则命中 附近影院 → GRAPH");
-            return SmartRouteResult.graph(directIntent("search_cinema"));
+            log.info("Router: 规则命中 附近影院 → REACT（使用 Amap 地理搜索）");
+            return SmartRouteResult.react();
         }
 
         if (matches(MOVIE_DISCOVERY_PATTERN, message)) {

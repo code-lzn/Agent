@@ -183,6 +183,9 @@ public class AiServiceImpl implements AiService {
                 + "当前登录用户ID: " + userId + "\n"
                 + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
         StringBuilder fullResponse = new StringBuilder();
+        // ★ 捕获卡片数据用于持久化（Lambda 内只能引用 effectively-final 变量，用数组做容器）
+        final String[] lastCardType = {null};
+        final String lastCardData[] = {null};
 
         return aiCodeGeneratorFactory.doAgentChatStream(
                         message, conversationId, prompt,
@@ -199,6 +202,8 @@ public class AiServiceImpl implements AiService {
                     }
                     if ("card".equals(chunk.type())) {
                         // ★ 工具结果作为卡片事件发送，前端渲染为交互卡片
+                        lastCardType[0] = chunk.cardType();
+                        lastCardData[0] = chunk.cardData();
                         Map<String, Object> cardPayload = new LinkedHashMap<>();
                         cardPayload.put("type", "card");
                         cardPayload.put("cardType", chunk.cardType());
@@ -233,7 +238,16 @@ public class AiServiceImpl implements AiService {
                                     .build());
                 })
                 .doFinally(signal -> {
-                    saveMovieChatHistory(conversationId, userId, message, fullResponse.toString());
+                    // ★ 持久化卡片数据：与 graphCore 对齐，卡片也能在历史记录中恢复
+                    Map<String, Object> cardDataMap = null;
+                    if (lastCardType[0] != null && lastCardData[0] != null) {
+                        try {
+                            cardDataMap = new LinkedHashMap<>(JSONUtil.parseObj(lastCardData[0]));
+                        } catch (Exception ignored) { /* 解析失败降级 */ }
+                    }
+                    saveMovieChatHistory(
+                            conversationId, userId, message, fullResponse.toString(),
+                            lastCardType[0], cardDataMap);
                     movieStateManager.refreshTtl(conversationId);
                     ConversationContext.clear();
                 });
@@ -383,7 +397,8 @@ public class AiServiceImpl implements AiService {
 
     @Override
     public Flux<ServerSentEvent<String>> doMovieSmartChatStream(
-            String message, String conversationId, Long userId, String currentCity) {
+            String message, String conversationId, Long userId, String currentCity,
+            Double lat, Double lng) {
         String normalizedCity = normalizeCity(currentCity);
 
         ServerSentEvent<String> initialStatus = ServerSentEvent.<String>builder()
@@ -396,6 +411,9 @@ public class AiServiceImpl implements AiService {
                     ConversationState state = movieStateManager.getState(conversationId);
                     if (userId != null) state.setUserId(userId);
                     if (normalizedCity != null) state.setCurrentCity(normalizedCity);
+                    // ★ 存储用户精确坐标到对话状态
+                    if (lat != null && lat != 0) state.setUserLat(lat);
+                    if (lng != null && lng != 0) state.setUserLng(lng);
                     movieStateManager.saveState(conversationId, state);
                     // SmartRouter 内置 GuardRail，一次完成「安全检查 + 路由决策」
                     return smartMovieRouter.route(message, state);
@@ -508,8 +526,22 @@ public class AiServiceImpl implements AiService {
 
     private String withCurrentCity(String prompt, String currentCity) {
         if (currentCity == null) return prompt;
-        return prompt + "\n\n## 当前运行上下文\n用户当前城市：" + currentCity
-                + "。当用户提到附近、本地或就近时，优先使用该城市筛选影院。";
+        String ctx = "\n\n## ★ 当前运行上下文（已自动获取，绝对不要反问用户！）\n"
+                + "用户当前城市：" + currentCity
+                + "。系统已通过 GPS/IP 自动定位，用户说"+"附近"+"时直接调用 searchNearbyCinemas，**严禁**追问"+"您在哪里"+"！";
+        // ★ 从 ConversationState 获取精确坐标注入 prompt
+        try {
+            String convId = ConversationContext.get();
+            if (convId != null) {
+                ConversationState state = movieStateManager.getState(convId);
+                if (state.getUserLat() != null && state.getUserLng() != null
+                        && state.getUserLat() != 0 && state.getUserLng() != 0) {
+                    ctx += "\n用户精确坐标: lat=" + state.getUserLat() + ", lng=" + state.getUserLng()
+                         + "。调用 searchNearbyCinemas 时务必同时传入 lat/lng（radius 建议 2000-3000），不要只传城市名！";
+                }
+            }
+        } catch (Exception ignored) { /* 非关键 */ }
+        return prompt + ctx;
     }
 
     private String getMovieSystemPrompt() {

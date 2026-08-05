@@ -66,6 +66,12 @@ public class ConversationState implements Serializable {
     /** 前端定位或手动选择的当前城市 */
     private String currentCity;
 
+    /** 用户当前纬度（WGS84），来自前端 GPS/IP 定位 */
+    private Double userLat;
+
+    /** 用户当前经度（WGS84），来自前端 GPS/IP 定位 */
+    private Double userLng;
+
     /** 厅型偏好（IMAX/杜比/普通/4DX/VIP） */
     private String hallType;
 
@@ -194,6 +200,10 @@ public class ConversationState implements Serializable {
         }
         if (currentCity != null) {
             sb.append("当前城市: ").append(currentCity).append("\n");
+        }
+        if (userLat != null && userLng != null && userLat != 0 && userLng != 0) {
+            sb.append("用户精确坐标: lat=").append(userLat).append(", lng=").append(userLng)
+              .append("（调用 searchNearbyCinemas 时务必传入此坐标以获得精准附近结果）\n");
         }
         if (showDate != null) {
             sb.append("日期: ").append(showDate);

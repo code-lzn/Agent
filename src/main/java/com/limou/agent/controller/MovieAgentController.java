@@ -86,8 +86,10 @@ public class MovieAgentController {
             @RequestParam String message,
             @RequestParam String conversationId,
             @RequestParam(required = false) Long userId,
-            @RequestParam(required = false) String city) {
-        return aiService.doMovieSmartChatStream(message, conversationId, userId, city);
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) Double lat,
+            @RequestParam(required = false) Double lng) {
+        return aiService.doMovieSmartChatStream(message, conversationId, userId, city, lat, lng);
     }
 
     /**
