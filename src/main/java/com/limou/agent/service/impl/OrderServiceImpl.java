@@ -104,6 +104,19 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "场次不存在");
         }
 
+        // 1.5 校验电影是否已开场
+        if (schedule.getShowDate() != null && schedule.getStartTime() != null) {
+            try {
+                LocalDateTime showTime = LocalDateTime.parse(
+                        schedule.getShowDate() + " " + schedule.getStartTime(),
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+                if (showTime.isBefore(LocalDateTime.now())) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法购票");
+                }
+            } catch (BusinessException e) { throw e; }
+            catch (Exception ignored) { /* 解析失败跳过 */ }
+        }
+
         // 2. 锁座（Redis 锁 + 乐观锁，替代 FOR UPDATE 行锁）
         SeatLockResult lockResult = seatLockService.lockSeats(
                 request.getScheduleId(), request.getSeatIds(), getLockDuration());
@@ -235,17 +248,56 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .eq("status", status, StrUtil.isNotBlank(status))
                 .orderBy("createTime", false);
         Page<Order> orderPage = this.page(Page.of(pageNum, pageSize), qw);
+        List<Order> orders = orderPage.getRecords();
 
         Page<OrderVO> voPage = new Page<>(orderPage.getPageNumber(), orderPage.getPageSize(), orderPage.getTotalRow());
-        List<OrderVO> voList = orderPage.getRecords().stream()
-                .map(order -> {
-                    QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
-                    List<OrderSeat> orderSeats = orderSeatService.list(sqw);
-                    OrderVO vo = buildOrderVO(order, null);
-                    vo.setSeatLabels(orderSeats.stream().map(OrderSeat::getSeatLabel).collect(Collectors.toList()));
-                    return vo;
-                })
-                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(orders)) {
+            voPage.setRecords(Collections.emptyList());
+            return voPage;
+        }
+
+        // 批量查座位（一次查询替代 N 次）
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        QueryWrapper seatQw = QueryWrapper.create().in("orderId", orderIds);
+        List<OrderSeat> allSeats = orderSeatService.list(seatQw);
+        Map<Long, List<String>> seatLabelMap = allSeats.stream()
+                .collect(Collectors.groupingBy(OrderSeat::getOrderId,
+                        Collectors.mapping(OrderSeat::getSeatLabel, Collectors.toList())));
+
+        // 批量查排期→影片拿海报（一次查排期 + 一次查影片，替代 N*2 次）
+        List<Long> scheduleIds = orders.stream().map(Order::getScheduleId)
+                .filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        final Map<Long, Schedule> scheduleMap;
+        final Map<Long, Film> filmMap;
+        if (CollUtil.isNotEmpty(scheduleIds)) {
+            List<Schedule> schedules = scheduleService.listByIds(scheduleIds);
+            scheduleMap = schedules.stream().collect(Collectors.toMap(Schedule::getId, s -> s));
+            List<Long> filmIds = schedules.stream().map(Schedule::getFilmId)
+                    .filter(Objects::nonNull).distinct().collect(Collectors.toList());
+            if (CollUtil.isNotEmpty(filmIds)) {
+                List<Film> films = filmService.listByIds(filmIds);
+                filmMap = films.stream().collect(Collectors.toMap(Film::getId, f -> f));
+            } else {
+                filmMap = Collections.emptyMap();
+            }
+        } else {
+            scheduleMap = Collections.emptyMap();
+            filmMap = Collections.emptyMap();
+        }
+
+        // 内存组装 VO
+        List<OrderVO> voList = orders.stream().map(order -> {
+            OrderVO vo = new OrderVO();
+            BeanUtil.copyProperties(order, vo);
+            vo.setSeatLabels(seatLabelMap.getOrDefault(order.getId(), Collections.emptyList()));
+            Schedule schedule = scheduleMap.get(order.getScheduleId());
+            if (schedule != null) {
+                Film film = filmMap.get(schedule.getFilmId());
+                if (film != null) vo.setPosterUrl(film.getPosterUrl());
+            }
+            return vo;
+        }).collect(Collectors.toList());
+
         voPage.setRecords(voList);
         return voPage;
     }
