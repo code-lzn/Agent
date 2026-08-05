@@ -197,6 +197,20 @@ public class AiServiceImpl implements AiService {
                                         "toolName", chunk.toolName())))
                                 .build();
                     }
+                    if ("card".equals(chunk.type())) {
+                        // ★ 工具结果作为卡片事件发送，前端渲染为交互卡片
+                        Map<String, Object> cardPayload = new LinkedHashMap<>();
+                        cardPayload.put("type", "card");
+                        cardPayload.put("cardType", chunk.cardType());
+                        try {
+                            cardPayload.put("data", JSONUtil.parseObj(chunk.cardData()));
+                        } catch (Exception e) {
+                            cardPayload.put("data", Map.of("raw", chunk.cardData()));
+                        }
+                        return ServerSentEvent.<String>builder()
+                                .data(JSONUtil.toJsonStr(cardPayload))
+                                .build();
+                    }
                     fullResponse.append(chunk.content());
                     return ServerSentEvent.<String>builder()
                             .data(JSONUtil.toJsonStr(Map.of("d", chunk.content())))
@@ -260,9 +274,15 @@ public class AiServiceImpl implements AiService {
         String intent = decision.getIntent();
         String toolResult = decision.getToolResult();
         boolean hasTool = toolResult != null && !toolResult.isEmpty();
-        String cardType = decision.getCardType();
-        boolean hasCard = cardType != null && decision.getCardData() != null;
-        String cardError = hasCard ? extractCardError(decision.getCardData()) : null;
+        String rawCardType = decision.getCardType();
+        boolean rawHasCard = rawCardType != null && decision.getCardData() != null;
+
+        // ★ 空结果卡片 = 没有实际数据，不应该走卡片路径（否则 LLM 会对着 ConversationState 编造内容）
+        final boolean emptyCard = rawHasCard && isCardDataEmpty(decision.getCardData());
+        final boolean hasCard = rawHasCard && !emptyCard;
+        final String cardType = hasCard ? rawCardType : null;
+        final String cardError = emptyCard ? "查询无结果"
+                : (rawHasCard ? extractCardError(decision.getCardData()) : null);
 
         ConversationState state = decision.getConvState() != null
                 ? decision.getConvState()
@@ -270,11 +290,11 @@ public class AiServiceImpl implements AiService {
 
         String stateContext = state.toPromptContext();
         // 有卡片时 {tool_result} 替换为简短提示 + 强约束，避免 LLM 把原始 JSON 当文本输出
-        String toolResultForPrompt;
-        String antiJsonRule;
+        final String toolResultForPrompt;
+        final String antiJsonRule;
         if (cardError != null) {
-            toolResultForPrompt = "工具执行失败：" + cardError;
-            antiJsonRule = "\n\n## 重要规则\n工具执行失败。必须说明真实失败原因并引导用户重新选择，禁止声称卡片内容已经成功展示。不要输出JSON。";
+            toolResultForPrompt = "工具执行结果：" + cardError + "。原始数据：" + (toolResult != null ? toolResult : "无");
+            antiJsonRule = "\n\n## 重要规则\n工具执行结果为空或失败（" + cardError + "）。必须如实告知用户没有找到匹配结果，**严禁**用对话状态中的历史信息编造"+"找到了XXX"+"之类的虚假回复。引导用户换个条件试试。不要输出JSON。";
         } else if (hasCard) {
             toolResultForPrompt = "已通过前端卡片展示";
             antiJsonRule = "\n\n## 重要规则\n工具执行结果已通过可视化卡片在前端展示，你**不要**重复输出数据。\n**严禁**在回复中出现任何JSON代码块。只需要用自然语言组织回复即可。";
@@ -417,6 +437,28 @@ public class AiServiceImpl implements AiService {
     private String extractCardError(Map<String, Object> cardData) {
         Object error = cardData.get("error");
         return error != null && !error.toString().isBlank() ? error.toString() : null;
+    }
+
+    /** 判断卡片数据是否为空结果（如 sessions=[], films=[], cinemas=[]） */
+    private boolean isCardDataEmpty(Map<String, Object> cardData) {
+        if (cardData == null) return true;
+        // 检查常见的数据列表字段
+        for (String key : new String[]{
+                "sessions", "films", "cinemas", "schedules", "alternatives",
+                "seatGrid",    // 座位图二维数组
+                "lockedSeats", // 锁座结果列表
+                "conflictSeats"}) {
+            Object val = cardData.get(key);
+            if (val instanceof List && !((List<?>) val).isEmpty()) return false;
+        }
+        // 检查 total / count / availableCount 等数值字段
+        for (String key : new String[]{"total", "availableCount", "count", "scheduleId", "hallId", "orderId"}) {
+            Object val = cardData.get(key);
+            if (val instanceof Number && ((Number) val).intValue() > 0) return false;
+        }
+        // 有 success=false 或有 error → 不算"空"（走 error 分支处理）
+        if (cardData.containsKey("error") || Boolean.FALSE.equals(cardData.get("success"))) return false;
+        return true;
     }
 
     private void saveMovieChatHistory(String conversationId, Long userId, String userMessage, String aiResponse) {

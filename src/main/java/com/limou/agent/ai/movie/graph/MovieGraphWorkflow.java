@@ -181,7 +181,7 @@ public class MovieGraphWorkflow {
         String cardType = null;
         Map<String, Object> cardData = null;
         if (hasTool) {
-            cardType = cardTypeForIntent(intent);
+            cardType = cardTypeForIntent(intent, toolResult);
             cardData = parseCardData(toolResult);
         }
 
@@ -203,19 +203,29 @@ public class MovieGraphWorkflow {
 
     // ==================== 卡片映射 ====================
 
-    /** intent → 前端 cardType 映射 */
-    private static String cardTypeForIntent(String intent) {
+    /** intent → 前端 cardType 映射，lock_seats 根据结果区分成功/失败 */
+    private static String cardTypeForIntent(String intent, String toolResult) {
         if (intent == null) return null;
         return switch (intent) {
             case "search_movie"   -> "film_list";
             case "search_cinema"  -> "cinema_list";
             case "search_schedule"-> "schedule_list";
             case "get_seat_map"   -> "seat_map";
-            case "lock_seats"     -> "seats_confirmed";
+            case "lock_seats"     -> isSuccessResult(toolResult) ? "seats_confirmed" : "seat_alternatives";
             case "create_order"   -> "order_detail";
             case "pay_order"      -> "payment_form";
             default               -> null;
         };
+    }
+
+    /** 判断工具结果是否成功 */
+    private static boolean isSuccessResult(String toolResult) {
+        if (toolResult == null || toolResult.isBlank()) return false;
+        try {
+            return JSONUtil.parseObj(toolResult).getBool("success", false);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 解析工具结果 JSON 为 Map（供前端卡片渲染） */

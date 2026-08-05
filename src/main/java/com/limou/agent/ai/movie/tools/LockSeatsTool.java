@@ -106,14 +106,61 @@ public class LockSeatsTool extends BaseTool {
             }
 
             if (!unavailableSeats.isEmpty()) {
-                // 查找附近可用座位作为推荐
-                List<Map<String, Object>> alternatives = findAlternatives(scheduleId, unavailableSeats);
-                Map<String, Object> result = new HashMap<>();
-                result.put("success", false);
-                result.put("conflictSeats", unavailableSeats);
-                result.put("alternatives", alternatives);
-                result.put("message", "部分座位已被占用，为您推荐附近可选座位～");
-                return objectMapper.writeValueAsString(result);
+                // ★ 幂等检查：过滤掉当前会话已锁定的座位（避免重复锁失败）
+                String convId = ConversationContext.get();
+                List<Map<String, Object>> trulyUnavailable = new ArrayList<>();
+                if (convId != null) {
+                    try {
+                        ConversationState convState = stateManager.getState(convId);
+                        List<Long> existingSeatIds = convState.getSeatIds();
+                        if (existingSeatIds != null && !existingSeatIds.isEmpty()) {
+                            for (Map<String, Object> us : unavailableSeats) {
+                                Long seatId = ((Number) us.get("seatId")).longValue();
+                                if (!existingSeatIds.contains(seatId)) {
+                                    trulyUnavailable.add(us);
+                                }
+                            }
+                        } else {
+                            trulyUnavailable.addAll(unavailableSeats);
+                        }
+                    } catch (Exception e) {
+                        trulyUnavailable.addAll(unavailableSeats);
+                    }
+                } else {
+                    trulyUnavailable.addAll(unavailableSeats);
+                }
+
+                // 如果所有冲突座位都是自己锁的且没有新的 availableSeats 需要锁 → 幂等成功
+                if (trulyUnavailable.isEmpty() && availableSeats.isEmpty()) {
+                    List<String> lockedLabels = unavailableSeats.stream()
+                            .map(s -> (String) s.get("seatLabel"))
+                            .collect(Collectors.toList());
+                    Schedule schedule = scheduleMapper.selectOneById(scheduleId);
+                    BigDecimal totalPrice = lockedLabels.isEmpty() ? BigDecimal.ZERO
+                            : (schedule != null && schedule.getPrice() != null
+                                    ? schedule.getPrice().multiply(BigDecimal.valueOf(lockedLabels.size()))
+                                    : BigDecimal.ZERO);
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", true);
+                    result.put("lockedSeats", lockedLabels);
+                    result.put("count", lockedLabels.size());
+                    result.put("totalPrice", totalPrice);
+                    result.put("message", "座位已锁定： " + String.join("、", lockedLabels) + "（之前已锁定）");
+                    log.info("lockSeats 幂等返回: conversationId={}, seats={}", convId, lockedLabels);
+                    return objectMapper.writeValueAsString(result);
+                }
+
+                if (!trulyUnavailable.isEmpty()) {
+                    // 有真正被他人占用的座位 → 推荐替代方案
+                    List<Map<String, Object>> alternatives = findAlternatives(scheduleId, trulyUnavailable);
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("success", false);
+                    result.put("conflictSeats", trulyUnavailable);
+                    result.put("alternatives", alternatives);
+                    result.put("message", "部分座位已被占用，为您推荐附近可选座位～");
+                    return objectMapper.writeValueAsString(result);
+                }
+                // trulyUnavailable 为空但有 availableSeats → 继续正常锁定流程
             }
 
             // 3. 使用 Redis 分布式锁 + DB 乐观锁

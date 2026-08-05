@@ -15,6 +15,8 @@ public enum CardType {
     ORDER_CONFIRM("order_confirm"),
     /** 推荐卡片（替代方案、异常推荐） */
     RECOMMENDATION("recommendation"),
+    /** 座位替代方案卡片（锁座失败时的备选座位） */
+    SEAT_ALTERNATIVES("seat_alternatives"),
     /** 进度卡片 */
     PROGRESS("progress");
 

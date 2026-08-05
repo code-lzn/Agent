@@ -2,6 +2,7 @@ package com.limou.agent.controller;
 
 import com.limou.agent.ai.ratelimiter.annotation.RateLimit;
 import com.limou.agent.ai.ratelimiter.enums.RateLimitType;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.dto.movie.MovieChatRequest;
 import com.limou.agent.ai.movie.MovieStateManager;
 import cn.hutool.json.JSONObject;
@@ -102,6 +103,32 @@ public class MovieAgentController {
         }
         String error = json.getStr("error", json.getStr("message", "支付异常"));
         return "<html><body style=\"display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;\"><div style=\"text-align:center\"><h2>支付失败</h2><p>" + error + "</p></div></body></html>";
+    }
+
+    /**
+     * 同步座位页操作到 AI 状态 —— 用户在选座页手动下单后，让 AI 感知上下文
+     */
+    @PostMapping("/sync-state")
+    public String syncState(@RequestParam Long userId,
+                            @RequestParam Long scheduleId,
+                            @RequestParam Long orderId,
+                            @RequestParam(required = false) String seatLabels) {
+        // 查找该用户当前会话
+        String conversationId = movieStateManager.findCurrentConversationId(userId);
+        if (conversationId == null) {
+            return "{\"success\":false,\"message\":\"无活跃会话\"}";
+        }
+        ConversationState state = movieStateManager.getState(conversationId);
+        state.setScheduleId(scheduleId);
+        state.setOrderId(orderId);
+        if (seatLabels != null && !seatLabels.isBlank()) {
+            state.setSeatLabels(java.util.Arrays.asList(seatLabels.split("、")));
+        }
+        state.setUserId(userId);
+        movieStateManager.saveState(conversationId, state);
+        log.info("SyncState: conversationId={}, scheduleId={}, orderId={}, seats={}",
+                conversationId, scheduleId, orderId, seatLabels);
+        return "{\"success\":true,\"message\":\"状态已同步\"}";
     }
 
     /**

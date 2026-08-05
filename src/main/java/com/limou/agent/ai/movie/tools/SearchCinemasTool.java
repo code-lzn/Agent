@@ -2,9 +2,12 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.limou.agent.ai.movie.ConversationContext;
+import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.CinemaMapper;
 import com.limou.agent.mapper.ScheduleMapper;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.Cinema;
 import com.limou.agent.model.entity.Schedule;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -33,6 +36,9 @@ public class SearchCinemasTool extends BaseTool {
 
     @Resource
     private ObjectMapper objectMapper;
+
+    @Resource
+    private MovieStateManager stateManager;
 
     @Tool(description = "搜索影院，支持按名称关键词和城市筛选。可传入filmId查找有该片排片的影院。返回影院列表JSON")
     public String searchCinemas(
@@ -103,6 +109,23 @@ public class SearchCinemasTool extends BaseTool {
             Map<String, Object> result = new HashMap<>();
             result.put("cinemas", cinemaList);
             result.put("total", cinemaList.size());
+
+            // ★ ReAct 模式下写回 cinemaId 到 ConversationState
+            String convId = ConversationContext.get();
+            if (convId != null && cinemaList.size() == 1) {
+                try {
+                    ConversationState convState = stateManager.getState(convId);
+                    if (convState.getCinemaId() == null) {
+                        Map<String, Object> only = cinemaList.get(0);
+                        convState.setCinemaId(((Number) only.get("cinemaId")).longValue());
+                        convState.setCinemaName((String) only.get("name"));
+                        stateManager.saveState(convId, convState);
+                        log.info("SearchCinemas 写回 cinemaId={}: convId={}", convState.getCinemaId(), convId);
+                    }
+                } catch (Exception e) {
+                    log.warn("SearchCinemas 写回状态失败: convId={}", convId, e);
+                }
+            }
 
             String json = objectMapper.writeValueAsString(result);
             log.info("searchCinemas 查询结果: keyword={}, city={}, filmId={}, 找到{}家影院",

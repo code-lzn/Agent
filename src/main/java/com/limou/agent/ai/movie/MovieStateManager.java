@@ -1,6 +1,9 @@
 package com.limou.agent.ai.movie;
 
+import com.limou.agent.mapper.ConversationStateMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
+import com.limou.agent.model.entity.ConversationStateEntity;
+import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
@@ -12,38 +15,56 @@ import java.time.LocalDateTime;
 
 /**
  * 电影票对话状态管理器
- * 使用 Redis 存储和读取每个会话的槽位状态
+ * 双写 Redis + MySQL，Redis 为主、MySQL 兜底（防重启丢失）
  * Key: movie:state:{conversationId}
- * TTL: 30 分钟（对话空闲后自动清理）
+ * TTL: 7 天
  */
 @Slf4j
 @Component
 public class MovieStateManager {
 
     private static final String KEY_PREFIX = "movie:state:";
-    private static final Duration STATE_TTL = Duration.ofMinutes(30);
+    private static final Duration STATE_TTL = Duration.ofDays(7);
 
     @Resource
     private RedissonClient redissonClient;
 
+    @Resource
+    private ConversationStateMapper conversationStateMapper;
+
     /**
-     * 获取会话状态（不存在则返回初始空状态）
+     * 获取会话状态（Redis → 不存在则从 MySQL 恢复）
      */
     public ConversationState getState(String conversationId) {
-        //无感知的操作一个map一样
+        // 1. 先查 Redis
         RBucket<String> bucket = getBucket(conversationId);
         String json = bucket.get();
         if (json != null && !json.isEmpty()) {
             try {
                 ConversationState state = ConversationState.fromJson(json);
                 state.setConversationId(conversationId);
-                log.debug("加载对话状态: conversationId={}, currentStep={}", conversationId, state.getCurrentStep());
+                log.debug("加载对话状态(Redis): conversationId={}", conversationId);
                 return state;
             } catch (Exception e) {
-                log.warn("解析对话状态失败，将使用新状态: conversationId={}", conversationId, e);
+                log.warn("解析对话状态失败: conversationId={}", conversationId, e);
             }
         }
-        // 返回初始空状态
+
+        // 2. Redis 空 → 从 MySQL 恢复
+        try {
+            ConversationState dbState = loadFromDb(conversationId);
+            if (dbState != null) {
+                // 恢复到 Redis
+                saveToRedis(conversationId, dbState);
+                log.info("从 MySQL 恢复对话状态: conversationId={}, filmName={}, cinemaName={}",
+                        conversationId, dbState.getFilmName(), dbState.getCinemaName());
+                return dbState;
+            }
+        } catch (Exception e) {
+            log.warn("从 MySQL 加载状态失败: conversationId={}", conversationId, e);
+        }
+
+        // 3. 都没有 → 新状态
         ConversationState newState = new ConversationState();
         newState.setConversationId(conversationId);
         newState.setLastUpdate(LocalDateTime.now());
@@ -51,18 +72,83 @@ public class MovieStateManager {
     }
 
     /**
-     * 保存会话状态到 Redis，设置 30 分钟过期
+     * 保存会话状态 — Redis + MySQL 双写
      */
     public void saveState(String conversationId, ConversationState state) {
         state.setConversationId(conversationId);
         state.setLastUpdate(LocalDateTime.now());
+        // Redis（主存储）
+        saveToRedis(conversationId, state);
+        // MySQL（兜底，异步保存，静默失败）
+        try {
+            saveToDb(conversationId, state);
+        } catch (Exception e) {
+            log.warn("保存状态到 MySQL 失败（状态仍在 Redis 中）: conversationId={}", conversationId, e);
+        }
+    }
+
+    // ===== 私有方法 =====
+
+    private void saveToRedis(String conversationId, ConversationState state) {
         try {
             RBucket<String> bucket = getBucket(conversationId);
             bucket.set(state.toJson(), STATE_TTL);
-            log.debug("保存对话状态: conversationId={}, currentStep={}", conversationId, state.getCurrentStep());
         } catch (Exception e) {
-            log.error("保存对话状态失败: conversationId={}", conversationId, e);
+            log.error("保存状态到 Redis 失败: conversationId={}", conversationId, e);
         }
+    }
+
+    /** 存到 MySQL 独立表 conversation_state（UPSERT：有则更新，无则插入） */
+    private void saveToDb(String conversationId, ConversationState state) {
+        LocalDateTime now = LocalDateTime.now();
+        // 查已有记录
+        QueryWrapper queryWrapper = QueryWrapper.create()
+                .eq(ConversationStateEntity::getConversationId, conversationId);
+        ConversationStateEntity existing = conversationStateMapper.selectOneByQuery(queryWrapper);
+
+        if (existing != null) {
+            existing.setStateJson(state.toJson());
+            existing.setUserId(state.getUserId());
+            existing.setUpdateTime(now);
+            conversationStateMapper.update(existing);
+        } else {
+            conversationStateMapper.insert(ConversationStateEntity.builder()
+                    .conversationId(conversationId)
+                    .stateJson(state.toJson())
+                    .userId(state.getUserId())
+                    .createTime(now)
+                    .updateTime(now)
+                    .build());
+        }
+    }
+
+    /** 查找用户当前活跃会话的 conversationId */
+    public String findCurrentConversationId(Long userId) {
+        if (userId == null) return null;
+        try {
+            QueryWrapper wrapper = QueryWrapper.create()
+                    .eq(ConversationStateEntity::getUserId, userId)
+                    .orderBy(ConversationStateEntity::getUpdateTime, false)
+                    .limit(1);
+            ConversationStateEntity entity = conversationStateMapper.selectOneByQuery(wrapper);
+            return entity != null ? entity.getConversationId() : null;
+        } catch (Exception e) {
+            log.warn("查找当前会话失败: userId={}", userId, e);
+            return null;
+        }
+    }
+
+    /** 从 MySQL 加载状态 */
+    private ConversationState loadFromDb(String conversationId) {
+        QueryWrapper wrapper = QueryWrapper.create()
+                .eq(ConversationStateEntity::getConversationId, conversationId);
+        ConversationStateEntity entity = conversationStateMapper.selectOneByQuery(wrapper);
+        if (entity != null && entity.getStateJson() != null && !entity.getStateJson().isBlank()) {
+            ConversationState state = ConversationState.fromJson(entity.getStateJson());
+            state.setConversationId(conversationId);
+            return state;
+        }
+        return null;
     }
 
     /**
@@ -70,6 +156,14 @@ public class MovieStateManager {
      */
     public void clearState(String conversationId) {
         getBucket(conversationId).delete();
+        // 同时清除 MySQL 中的状态
+        try {
+            QueryWrapper wrapper = QueryWrapper.create()
+                    .eq(ConversationStateEntity::getConversationId, conversationId);
+            conversationStateMapper.deleteByQuery(wrapper);
+        } catch (Exception e) {
+            log.warn("清除 MySQL 状态失败: conversationId={}", conversationId, e);
+        }
         log.debug("清除对话状态: conversationId={}", conversationId);
     }
 

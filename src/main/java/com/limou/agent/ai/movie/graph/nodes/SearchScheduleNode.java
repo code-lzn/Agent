@@ -35,11 +35,24 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
 
         ConversationState convState = state.getConvState();
 
+        // ★ 安全网：filmId 未解析时不能查场次（否则会查出全部场次）
+        if (convState.getFilmId() == null && convState.getFilmName() != null) {
+            String error = "{\"error\":\"请先确认影片\",\"filmName\":\""
+                    + convState.getFilmName() + "\"}";
+            state.setToolResult(error);
+            state.setToolName(MovieIntent.SEARCH_SCHEDULE.getCode());
+            log.warn("SearchSchedule 被阻止: filmId=null, filmName={}, conversationId={}",
+                    convState.getFilmName(), state.getConversationId());
+            return state;
+        }
+
         String result = tool.searchSchedules(
                 convState.getFilmId(),
                 convState.getCinemaId(),
                 convState.getShowDate(),
-                convState.getHallType());
+                convState.getHallType(),
+                convState.getStartTime(),
+                null);  // hallName 由 LLM 从用户输入提取后直接传入工具，不从 state 取
 
         state.setToolResult(result);
         state.setToolName(MovieIntent.SEARCH_SCHEDULE.getCode());

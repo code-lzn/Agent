@@ -21,8 +21,13 @@ import java.util.regex.Pattern;
 public class SmartMovieRouter {
 
     /** 一条消息里同时出现"订/买/购" + 以下至少 2 类关键词 → 直接 ReAct */
-    private static final Pattern BOOKING_KEYWORD = Pattern.compile("(订|买|购|下单|抢).*(票|座|位)");
-    private static final Pattern MOVIE_NAME_HINT = Pattern.compile("《.+》|流浪地球|封神|哪吒|长安|万里|满江红|热辣|飞驰|人生|八角笼|孤注一掷|消失的她");
+    private static final Pattern BOOKING_KEYWORD = Pattern.compile("(订|买|购|下单|抢|选座|选.{0,2}座位|要).*(票|座|位)");
+    /** 影片 + 影院 + 座位诉求 → 即使没有显式订票词也走 ReAct（如"想看志愿3在万达，给我座位表"） */
+    private static final Pattern SEAT_REQUEST_HINT = Pattern.compile("(座|位|选.{0,2}座|座.{0,2}表|座.{0,2}图)");
+    private static final Pattern MOVIE_NAME_HINT = Pattern.compile(
+            "《.+》|流浪地球|封神|哪吒|长安|万里|满江红|热辣|飞驰|人生|八角笼|孤注一掷|消失的她"
+                    + "|志愿|战狼|红海|唐探|捉妖|大圣|白蛇|姜子牙|深海|熊出没|长津湖|水门桥|狙击手|奇迹|独行月球"
+                    + "|\\S{2,4}[：:]\\S");
     private static final Pattern TIME_HINT = Pattern.compile("(今天|明天|后天|周[一二三四五六日]|上午|下午|晚上|凌晨|\\d+点|\\d+:\\d+)");
     private static final Pattern CINEMA_HINT = Pattern
             .compile("(影院|影城|万达|CGV|金逸|中影|大地|博纳|卢米埃|百老汇|英皇|UA|离.{0,5}近|附近|旁边)");
@@ -76,7 +81,22 @@ public class SmartMovieRouter {
             return SmartRouteResult.graph(directIntent("search_movie"));
         }
 
-        // 一条消息包含 订票动作 + 影片名 + (时间 或 影院) → ReAct
+        // ★ 已有上下文 → 强制 Graph（维护多轮对话状态）
+        if (hasExistingContext(state)) {
+            log.info("Router: 已有上下文(film={}, cinema={}, schedule={}) → GRAPH",
+                    state.getFilmId(), state.getCinemaId(), state.getScheduleId());
+            return SmartRouteResult.graph(null);
+        }
+
+        // 影片名 + 影院 + 座位诉求 → ReAct（如"想看志愿3在万达，给我座位表"）
+        if (matches(MOVIE_NAME_HINT, message)
+                && matches(CINEMA_HINT, message)
+                && matches(SEAT_REQUEST_HINT, message)) {
+            log.info("Router: 规则命中 影片+影院+座位诉求 → REACT");
+            return SmartRouteResult.react();
+        }
+
+        // 一条消息包含 订票动作 + 影片名 + (时间 或 影院) → ReAct（首次，无上下文）
         if (matches(BOOKING_KEYWORD, message)
                 && matches(MOVIE_NAME_HINT, message)
                 && (matches(TIME_HINT, message) || matches(CINEMA_HINT, message))) {
@@ -155,6 +175,16 @@ public class SmartMovieRouter {
                 .intent(intent)
                 .slots(new ConversationState())
                 .build();
+    }
+
+    /**
+     * 判断是否已有实质性的对话上下文——有则走 Graph 维护状态，不走 ReAct。
+     */
+    private boolean hasExistingContext(ConversationState state) {
+        if (state == null) return false;
+        return (state.getFilmId() != null && state.getCinemaId() != null)
+                || state.getScheduleId() != null
+                || state.getOrderId() != null;
     }
 
     private boolean has(String s) {

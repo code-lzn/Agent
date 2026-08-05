@@ -60,9 +60,55 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
         }
         stateManager.saveState(state.getConversationId(), convState);
 
+        // ★ 智能重定向：缺失前置条件时自动降级意图
+        String resolvedIntent = resolveIntent(intentResult.getIntent(), convState, state.getConversationId());
+        if (!resolvedIntent.equals(intentResult.getIntent())) {
+            log.info("IntentClassify 重定向: {} -> {} (conversationId={})",
+                    intentResult.getIntent(), resolvedIntent, state.getConversationId());
+            state.setIntent(resolvedIntent);
+        }
+
         // 挂到 graph state 上，后续节点直接透传，不再从 Redis 重复读取
         state.setConvState(convState);
 
         return state;
+    }
+
+    /**
+     * 智能重定向：当用户意图需要的前置条件不满足时，自动降级到上一步。
+     * <pre>
+     *   get_seat_map 缺 scheduleId → search_schedule（有 filmId 时）
+     *   lock_seats   缺 seatIds   → get_seat_map（有 scheduleId 时）
+     *   create_order 缺 seatIds   → lock_seats（有 scheduleId + seatIds in state 时保持 create_order 由 LLM 处理）
+     * </pre>
+     */
+    private String resolveIntent(String intent, ConversationState state, String conversationId) {
+        return switch (intent) {
+            case "get_seat_map" -> {
+                if (state.getScheduleId() == null && state.getFilmId() != null) {
+                    yield "search_schedule";
+                }
+                yield intent;
+            }
+            case "search_schedule" -> {
+                // filmId 未解析但 filmName 已知 → 先搜影片
+                if (state.getFilmId() == null && has(state.getFilmName())) {
+                    yield "search_movie";
+                }
+                yield intent;
+            }
+            case "lock_seats" -> {
+                if ((state.getSeatIds() == null || state.getSeatIds().isEmpty())
+                        && state.getScheduleId() != null) {
+                    yield "get_seat_map";
+                }
+                yield intent;
+            }
+            default -> intent;
+        };
+    }
+
+    private boolean has(String s) {
+        return s != null && !s.isEmpty();
     }
 }

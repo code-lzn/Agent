@@ -2,8 +2,11 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.limou.agent.ai.movie.ConversationContext;
+import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.FilmMapper;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.Film;
 import com.limou.agent.model.enums.FilmStatusEnum;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -31,6 +34,9 @@ public class SearchFilmsTool extends BaseTool {
 
     @Resource
     private ObjectMapper objectMapper;
+
+    @Resource
+    private MovieStateManager stateManager;
 
     @Tool(description = "搜索影片，支持按名称关键词和影片类型筛选。返回影片列表JSON，包含影片ID、名称、类型、评分、时长、海报、简介")
     public String searchFilms(
@@ -81,6 +87,41 @@ public class SearchFilmsTool extends BaseTool {
             Map<String, Object> result = new HashMap<>();
             result.put("films", filmList);
             result.put("total", filmList.size());
+
+            // ★ ReAct 模式下写回 filmId 到 ConversationState，确保下一轮 Graph 有上下文
+            String convId = ConversationContext.get();
+            if (convId != null && !filmList.isEmpty()) {
+                try {
+                    Map<String, Object> firstFilm = filmList.get(0);
+                    ConversationState convState = stateManager.getState(convId);
+                    // 仅当 state 里还没有 filmId 或者 keyword 与当前 filmName 匹配时才写回
+                    if (convState.getFilmId() == null && keyword != null && !keyword.isBlank()) {
+                        // 首选精确匹配，其次模糊匹配
+                        for (Map<String, Object> f : filmList) {
+                            String name = (String) f.get("name");
+                            if (name != null && (name.equalsIgnoreCase(keyword)
+                                    || name.contains(keyword)
+                                    || keyword.contains(name))) {
+                                convState.setFilmId(((Number) f.get("filmId")).longValue());
+                                convState.setFilmName(name);
+                                stateManager.saveState(convId, convState);
+                                log.info("SearchFilms 写回 filmId={}: convId={}", convState.getFilmId(), convId);
+                                break;
+                            }
+                        }
+                        // 如果只有一个结果，也直接写回
+                        if (convState.getFilmId() == null && filmList.size() == 1) {
+                            Map<String, Object> only = filmList.get(0);
+                            convState.setFilmId(((Number) only.get("filmId")).longValue());
+                            convState.setFilmName((String) only.get("name"));
+                            stateManager.saveState(convId, convState);
+                            log.info("SearchFilms 写回(唯一结果) filmId={}: convId={}", convState.getFilmId(), convId);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("SearchFilms 写回状态失败: convId={}", convId, e);
+                }
+            }
 
             String json = objectMapper.writeValueAsString(result);
             log.info("searchFilms 查询结果: keyword={}, type={}, 找到{}部影片", keyword, type, filmList.size());
