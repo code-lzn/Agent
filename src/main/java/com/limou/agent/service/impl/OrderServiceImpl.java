@@ -16,6 +16,7 @@ import com.limou.agent.model.entity.*;
 import com.limou.agent.model.vo.OrderVO;
 import com.limou.agent.model.vo.PayOrderVO;
 import com.limou.agent.model.vo.SeatLockResult;
+import com.limou.agent.model.vo.TicketVO;
 import com.limou.agent.service.*;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
@@ -66,6 +67,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Autowired
     private SeatLockService seatLockService;
 
+    @Autowired
+    private TicketService ticketService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean lockSeat(LockSeatRequest request, Long userId) {
@@ -104,14 +108,49 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "场次不存在");
         }
 
-        // 2. 锁座（Redis 锁 + 乐观锁，替代 FOR UPDATE 行锁）
-        SeatLockResult lockResult = seatLockService.lockSeats(
-                request.getScheduleId(), request.getSeatIds(), getLockDuration());
-        if (!lockResult.isSuccess()) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR,
-                    "座位已被占用：" + formatLockError(lockResult));
+        // 1.5 校验电影是否已开场
+        if (schedule.getShowDate() != null && schedule.getStartTime() != null) {
+            try {
+                LocalDateTime showTime = LocalDateTime.parse(
+                        schedule.getShowDate() + " " + schedule.getStartTime(),
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+                if (showTime.isBefore(LocalDateTime.now())) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法购票");
+                }
+            } catch (BusinessException e) { throw e; }
+            catch (Exception ignored) { /* 解析失败跳过 */ }
         }
-        List<Seat> seats = lockResult.getLockedSeats();
+
+        // 2. 查询当前座位状态，区分预锁（前端已调 /order/lockSeat）和直接创建
+        List<Seat> currentSeats = seatService.listByIds(request.getSeatIds());
+        if (currentSeats.size() != request.getSeatIds().size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "部分座位不存在");
+        }
+        boolean anyUnavailable = currentSeats.stream()
+                .anyMatch(s -> !"locked".equals(s.getStatus()) && !"available".equals(s.getStatus()));
+        if (anyUnavailable) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "座位已被占用，请重新选座");
+        }
+        boolean allLocked = currentSeats.stream().allMatch(s -> "locked".equals(s.getStatus()));
+
+        List<Seat> seats;
+        if (allLocked) {
+            // 前端已预锁，直接复用，但需拿 Redis 锁防止并发冲突
+            for (Seat seat : currentSeats) {
+                if (!seat.getScheduleId().equals(request.getScheduleId())) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "座位不属于该场次");
+                }
+            }
+            seats = currentSeats;
+        } else {
+            SeatLockResult lockResult = seatLockService.lockSeats(
+                    request.getScheduleId(), request.getSeatIds(), getLockDuration());
+            if (!lockResult.isSuccess()) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                        "座位已被占用：" + formatLockError(lockResult));
+            }
+            seats = lockResult.getLockedSeats();
+        }
 
         try {
             // 3. 计算总价
@@ -166,6 +205,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             orderSeatService.saveBatch(orderSeats);
             // 座位状态已由 lockSeats 置为 locked，无需重复更新
 
+            // 8. 每座位生成一张票（独立 8 位取票码，可分次核销）
+            ticketService.createTickets(order.getId(), schedule.getId(), seats);
+
             log.info("用户 {} 创建订单 {}，座位: {}", userId, orderNo,
                     seats.stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
 
@@ -204,6 +246,51 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OrderVO mockPayOrder(PayOrderRequest request, Long userId) {
+        if (request == null || request.getOrderId() == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数无效");
+        }
+
+        Order order = this.getById(request.getOrderId());
+        if (order == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
+        }
+        if (!"pending".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅待支付订单可模拟支付");
+        }
+
+        // 模拟支付：直接标记为已支付
+        order.setStatus("paid");
+        order.setPaidAt(LocalDateTime.now());
+        order.setAlipayTradeNo("MOCK_" + IdUtil.getSnowflakeNextIdStr());
+        order.setAlipayStatus("TRADE_SUCCESS");
+        this.updateById(order);
+
+        // 更新座位为已售
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
+        if (CollUtil.isNotEmpty(seatIds)) {
+            List<Seat> seats = seatService.listByIds(seatIds);
+            seats.forEach(s -> s.setStatus("sold"));
+            seatService.updateBatch(seats);
+        }
+
+        log.info("用户 {} 模拟支付成功，订单号: {}", userId, order.getOrderNo());
+
+        List<String> seatLabels = orderSeats.stream()
+                .map(OrderSeat::getSeatLabel)
+                .collect(Collectors.toList());
+        OrderVO vo = buildOrderVO(order, null);
+        vo.setSeatLabels(seatLabels);
+        return vo;
+    }
+
+    @Override
     public OrderVO getOrderDetail(Long orderId, Long userId) {
         if (orderId == null || orderId <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "订单ID无效");
@@ -225,6 +312,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         OrderVO vo = buildOrderVO(order, null);
         vo.setSeatLabels(seatLabels);
+        // 每张票（独立取票码 + 动态核销状态）
+        vo.setTickets(ticketService.getTicketsByOrder(orderId));
         return vo;
     }
 
@@ -235,17 +324,62 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .eq("status", status, StrUtil.isNotBlank(status))
                 .orderBy("createTime", false);
         Page<Order> orderPage = this.page(Page.of(pageNum, pageSize), qw);
+        List<Order> orders = orderPage.getRecords();
 
         Page<OrderVO> voPage = new Page<>(orderPage.getPageNumber(), orderPage.getPageSize(), orderPage.getTotalRow());
-        List<OrderVO> voList = orderPage.getRecords().stream()
-                .map(order -> {
-                    QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
-                    List<OrderSeat> orderSeats = orderSeatService.list(sqw);
-                    OrderVO vo = buildOrderVO(order, null);
-                    vo.setSeatLabels(orderSeats.stream().map(OrderSeat::getSeatLabel).collect(Collectors.toList()));
-                    return vo;
-                })
-                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(orders)) {
+            voPage.setRecords(Collections.emptyList());
+            return voPage;
+        }
+
+        // 批量查座位（一次查询替代 N 次）
+        List<Long> orderIds = orders.stream().map(Order::getId).collect(Collectors.toList());
+        QueryWrapper seatQw = QueryWrapper.create().in("orderId", orderIds);
+        List<OrderSeat> allSeats = orderSeatService.list(seatQw);
+        Map<Long, List<String>> seatLabelMap = allSeats.stream()
+                .collect(Collectors.groupingBy(OrderSeat::getOrderId,
+                        Collectors.mapping(OrderSeat::getSeatLabel, Collectors.toList())));
+
+        // 批量查排期→影片拿海报（一次查排期 + 一次查影片，替代 N*2 次）
+        List<Long> scheduleIds = orders.stream().map(Order::getScheduleId)
+                .filter(Objects::nonNull).distinct().collect(Collectors.toList());
+        final Map<Long, Schedule> scheduleMap;
+        final Map<Long, Film> filmMap;
+        if (CollUtil.isNotEmpty(scheduleIds)) {
+            List<Schedule> schedules = scheduleService.listByIds(scheduleIds);
+            scheduleMap = schedules.stream().collect(Collectors.toMap(Schedule::getId, s -> s));
+            List<Long> filmIds = schedules.stream().map(Schedule::getFilmId)
+                    .filter(Objects::nonNull).distinct().collect(Collectors.toList());
+            if (CollUtil.isNotEmpty(filmIds)) {
+                List<Film> films = filmService.listByIds(filmIds);
+                filmMap = films.stream().collect(Collectors.toMap(Film::getId, f -> f));
+            } else {
+                filmMap = Collections.emptyMap();
+            }
+        } else {
+            scheduleMap = Collections.emptyMap();
+            filmMap = Collections.emptyMap();
+        }
+
+        // 批量查票（含核销状态），前端据此隐藏/禁用退款入口
+        Map<Long, List<TicketVO>> ticketMap = ticketService.getTicketsMapByOrderIds(orderIds);
+
+        // 内存组装 VO
+        List<OrderVO> voList = orders.stream().map(order -> {
+            OrderVO vo = new OrderVO();
+            BeanUtil.copyProperties(order, vo);
+            vo.setSeatLabels(seatLabelMap.getOrDefault(order.getId(), Collections.emptyList()));
+            Schedule schedule = scheduleMap.get(order.getScheduleId());
+            if (schedule != null) {
+                Film film = filmMap.get(schedule.getFilmId());
+                if (film != null) vo.setPosterUrl(film.getPosterUrl());
+            }
+            // 每张票（含核销状态），前端据此隐藏/禁用退款入口
+            vo.setTickets(ticketMap.getOrDefault(order.getId(), Collections.emptyList()));
+            return vo;
+        }).collect(Collectors.toList());
+
+
         voPage.setRecords(voList);
         return voPage;
     }
@@ -341,36 +475,73 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if ("refunded".equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已退款，不可重复操作");
         }
+        // 核销拦截：有任一票已核销使用 → 整单禁止退款
+        if (ticketService.hasUsedTicket(orderId)) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "有票已核销使用，无法退款");
+        }
+        if ("expired".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法退票");
+        }
+
+        // 开场前1分钟内不可退票
         try {
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
-            if (showTime.isBefore(LocalDateTime.now())) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法退款");
+            long diffMinutes = java.time.Duration.between(LocalDateTime.now(), showTime).toMinutes();
+            if (diffMinutes < 1) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "开场前1分钟内不支持退票");
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("解析放映时间失败，跳过开场校验: {}", order.getScheduleTime(), e);
+            log.warn("解析放映时间失败: {}", order.getScheduleTime(), e);
         }
-        String refundAmount = order.getTotalPrice().toString();
-        boolean refundSuccess = alipayService.refund(order.getOrderNo(), refundAmount, order.getAlipayTradeNo());
-        if (!refundSuccess) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
+
+        BigDecimal refundAmount = order.getTotalPrice();
+        int count = order.getCount() != null ? order.getCount() : 1;
+
+        String tradeNo = order.getAlipayTradeNo();
+        if (tradeNo == null || tradeNo.startsWith("MOCK_")) {
+            order.setStatus("refunded");
+            order.setCancelReason("退票");
+            order.setRefundAmount(refundAmount);
+            order.setRefundTime(LocalDateTime.now());
+            this.updateById(order);
+        } else {
+            boolean refundSuccess = alipayService.refund(order.getOrderNo(), refundAmount.toString(), tradeNo);
+            if (!refundSuccess) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
+            }
+            order.setStatus("refunded");
+            order.setCancelReason("退票");
+            order.setRefundAmount(refundAmount);
+            order.setRefundTime(LocalDateTime.now());
+            this.updateById(order);
         }
-        order.setStatus("refunded");
-        order.setCancelReason("user_refund");
-        order.setRefundAmount(order.getTotalPrice());
-        order.setRefundTime(LocalDateTime.now());
-        this.updateById(order);
+        // 未核销的票置为已退票
+        ticketService.markRefunded(orderId);
 
         QueryWrapper sqw = QueryWrapper.create().eq("orderId", orderId);
         List<OrderSeat> orderSeats = orderSeatService.list(sqw);
         List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
         if (CollUtil.isNotEmpty(seatIds)) {
-            // 释放座位 + Redis 锁（统一走锁服务）
             seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
         }
-        log.info("用户 {} 退款成功，订单号: {}, 退款金额: {}", userId, order.getOrderNo(), refundAmount);
+        log.info("用户 {} 退票成功，订单号: {}, {}张, 退款{}元",
+                userId, order.getOrderNo(), count, refundAmount);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOrder(Long orderId, Long userId) {
+        Order order = this.getById(orderId);
+        if (order == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        if (!order.getUserId().equals(userId)) throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        if ("pending".equals(order.getStatus()) || "paid".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅已退款、已取消或已过期的订单可删除");
+        }
+        this.removeById(orderId);
+        log.info("用户 {} 删除订单 {}", userId, order.getOrderNo());
     }
 
     @Override
@@ -393,6 +564,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if ("completed".equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "已完成订单无法取消");
         }
+        if ("expired".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法操作");
+        }
 
         // PRD 3.3.5 交互规则③：退款校验读取系统配置退款策略，超出可退款时限禁止退款
         if ("paid".equals(order.getStatus())) {
@@ -401,6 +575,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             if (paidAt != null && paidAt.plusHours(refundHours).isBefore(LocalDateTime.now())) {
                 throw new BusinessException(ErrorCode.OPERATION_ERROR,
                         "已超出可退款时限（" + refundHours + " 小时），无法退款");
+            }
+            // 核销拦截：有任一票已核销使用 → 整单禁止退款
+            if (ticketService.hasUsedTicket(orderId)) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "有票已核销使用，无法退款");
             }
         }
 
@@ -413,6 +591,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             order.setStatus("refunded");
             order.setRefundAmount(order.getTotalPrice());
             order.setRefundTime(LocalDateTime.now());
+            // 未核销的票置为已退票
+            ticketService.markRefunded(orderId);
         } else {
             order.setStatus("cancelled");
         }
@@ -437,6 +617,20 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 查找被锁定但没有关联订单的座位（超过30分钟前的锁定）
         // 简化实现：直接通过定时任务处理
         return 0;
+    }
+
+    /**
+     * 管理端订单列表：填充「是否有已核销票」标记（用于控制退款入口显示）。
+     */
+    public void fillCheckedStatus(List<Order> orders) {
+        if (CollUtil.isEmpty(orders)) {
+            return;
+        }
+        Set<Long> checkedIds = ticketService.getCheckedOrderIds(
+                orders.stream().map(Order::getId).collect(Collectors.toList()));
+        for (Order order : orders) {
+            order.setHasCheckedTicket(checkedIds.contains(order.getId()));
+        }
     }
 
     /**
@@ -495,10 +689,19 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order.getScheduleId() != null) {
             try {
                 Schedule schedule = scheduleService.getById(order.getScheduleId());
-                if (schedule != null && schedule.getFilmId() != null) {
-                    Film film = filmService.getById(schedule.getFilmId());
-                    if (film != null) {
-                        vo.setPosterUrl(film.getPosterUrl());
+                if (schedule != null) {
+                    if (schedule.getFilmId() != null) {
+                        Film film = filmService.getById(schedule.getFilmId());
+                        if (film != null) {
+                            vo.setPosterUrl(film.getPosterUrl());
+                        }
+                    }
+                    // 影院标签：通过 场次→影院 获取
+                    if (schedule.getCinemaId() != null) {
+                        Cinema cinema = cinemaService.getById(schedule.getCinemaId());
+                        if (cinema != null) {
+                            vo.setCinemaTags(cinema.getTags());
+                        }
                     }
                 }
             } catch (Exception e) {

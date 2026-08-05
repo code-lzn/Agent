@@ -90,7 +90,7 @@ public class Order implements Serializable {
     private Integer count;
 
     /**
-     * 状态: pending/paid/cancelled/completed
+     * 状态: pending/paid/cancelled/refunded/completed
      */
     private String status;
 
@@ -150,4 +150,10 @@ public class Order implements Serializable {
 
     @Column("updateTime")
     private LocalDateTime updateTime;
+
+    /**
+     * 是否有已核销的票（非数据库字段，管理端列表填充用，控制退款入口显示）
+     */
+    @Column(ignore = true)
+    private Boolean hasCheckedTicket;
 }

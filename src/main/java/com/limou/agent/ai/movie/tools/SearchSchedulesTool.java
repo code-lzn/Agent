@@ -17,9 +17,11 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
 import java.sql.Date;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -49,9 +51,20 @@ public class SearchSchedulesTool extends BaseTool {
             @ToolParam(description = "放映日期 yyyy-MM-dd（可选）") String showDate,
             @ToolParam(description = "厅型偏好，只能传类型简称如 IMAX/杜比/普通/4DX/VIP/巨幕/激光。不要传影厅全名如"+"杜比全景声厅"+"（传"+"杜比"+"即可）", required = false) String hallType,
             @ToolParam(description = "期望的开始时间 HH:mm，如 14:00。传入后只返回该时间前后3小时内的场次，并按时间接近程度排序（可选）", required = false) String startTime,
-            @ToolParam(description = "影厅名称关键词，如 杜比全景声厅/LED厅。与厅型独立，可同时传入（非必填）", required = false) String hallName
+            @ToolParam(description = "影厅名称或厅号关键词，如 杜比全景声厅/LED厅。**重要**：用户提到厅号时（如"+"1号厅"+"、"+""+"3号杜比厅"+"），必须传入厅号关键词（如"+"1号"+"、"+""+"3号"+"），用于精确筛选。与厅型可同时传入（非必填）", required = false) String hallName
     ) {
         try {
+            // ★ 兜底：如果 LLM 没传 hallName，但 hallType 里包含了厅号信息（如 "2号杜比厅"），自动提取
+            if ((hallName == null || hallName.isBlank()) && hallType != null && !hallType.isBlank()) {
+                hallName = extractHallNumber(hallType);
+                if (hallName != null) {
+                    // 从 hallType 中剥离厅号，只保留纯类型码
+                    hallType = hallType.replaceAll("\\d+号|\\d+厅|厅$", "").trim();
+                    if (hallType.isBlank()) hallType = null;
+                    log.info("searchSchedules 兜底提取: hallName={}, hallType={}", hallName, hallType);
+                }
+            }
+
             // 解析目标时间
             LocalTime targetTime = null;
             if (startTime != null && !startTime.isBlank()) {
@@ -78,6 +91,22 @@ public class SearchSchedulesTool extends BaseTool {
                     .orderBy(Schedule::getStartTime, true);
 
             List<Schedule> schedules = scheduleMapper.selectListByQuery(wrapper);
+
+            // ★ 过滤已过时的场次（今天已开场的场次不再展示）
+            LocalDateTime now = LocalDateTime.now();
+            schedules = schedules.stream()
+                    .filter(s -> {
+                        if (s.getShowDate() == null || s.getStartTime() == null) return true;
+                        try {
+                            LocalDateTime showDateTime = LocalDateTime.of(
+                                    s.getShowDate().toLocalDate(),
+                                    LocalTime.parse(s.getStartTime().toString()));
+                            return showDateTime.isAfter(now);
+                        } catch (Exception e) {
+                            return true;
+                        }
+                    })
+                    .collect(Collectors.toList());
 
             // 2. 查询关联的影厅信息
             Set<Long> hallIds = schedules.stream()
@@ -106,18 +135,31 @@ public class SearchSchedulesTool extends BaseTool {
                     String input = hallType.trim();
                     String dbType = hall.getHallType();   // "杜比" / "IMAX"
                     String dbName = hall.getName();        // "杜比全景声厅" / "IMAX激光厅"
-                    boolean matched = (dbType != null && (dbType.contains(input) || input.contains(dbType)))
-                            || (dbName != null && (dbName.contains(input) || input.contains(dbName)));
+                    boolean hasHallName = hallName != null && !hallName.isBlank();
+                    boolean matched;
+                    if (hasHallName) {
+                        // 有厅号/厅名时，hallType 只匹配类型码，不做厅名兜底
+                        // 避免 "杜比" 匹配到所有含"杜比"的厅名，覆盖掉厅号的精确筛选
+                        matched = dbType != null && (dbType.contains(input) || input.contains(dbType));
+                    } else {
+                        // 无厅号时兼容双向模糊匹配（LLM 可能传全名如"杜比全景声厅"）
+                        matched = (dbType != null && (dbType.contains(input) || input.contains(dbType)))
+                                || (dbName != null && (dbName.contains(input) || input.contains(dbName)));
+                    }
                     if (!matched) {
                         continue;
                     }
                 }
 
-                // ★ 厅名过滤 —— 双向模糊匹配，用于精确筛选特定影厅
+                // ★ 厅名过滤 —— 精确筛选特定影厅
+                // 厅号（如"2号"）使用数字边界匹配，避免"2号"误匹配"12号"
                 if (hallName != null && !hallName.isBlank()) {
                     String input = hallName.trim();
                     String dbName = hall.getName();
-                    if (dbName == null || (!dbName.contains(input) && !input.contains(dbName))) {
+                    if (dbName == null) {
+                        continue;
+                    }
+                    if (!hallNameMatches(input, dbName)) {
                         continue;
                     }
                 }
@@ -187,6 +229,44 @@ public class SearchSchedulesTool extends BaseTool {
             log.error("searchSchedules 查询失败", e);
             return "{\"sessions\":[],\"total\":0,\"error\":\"" + e.getMessage() + "\"}";
         }
+    }
+
+    /**
+     * 从字符串中提取厅号（如 "2号杜比厅" → "2号"，"1号IMAX" → "1号"）
+     * 找不到则返回 null
+     */
+    private String extractHallNumber(String s) {
+        if (s == null) return null;
+        java.util.regex.Matcher m = Pattern.compile("(\\d+号)").matcher(s);
+        if (m.find()) return m.group(1);
+        m = Pattern.compile("(\\d+厅)").matcher(s);
+        if (m.find()) return m.group(1);
+        return null;
+    }
+
+    /**
+     * 厅名匹配：数字厅号使用边界匹配，防止 "2号" 误匹配 "12号"；
+     * 非数字厅名（如"激光"）使用双向 contains。
+     */
+    private boolean hallNameMatches(String input, String dbName) {
+        // 提取输入中的数字部分（如 "2号" → "2", "3号厅" → "3"）
+        String numPart = input.replaceAll("[^\\d]", "");
+        if (!numPart.isEmpty() && (input.contains("号") || input.contains("厅"))) {
+            // 数字厅号：用正则边界匹配，避免 substring 误伤
+            // (?<!\d)2号 — "2号" 前面不能是数字（排除 "12号"）
+            Pattern p = Pattern.compile("(?<!\\d)" + Pattern.quote(numPart) + "号");
+            if (p.matcher(dbName).find()) {
+                return true;
+            }
+            Pattern p2 = Pattern.compile("(?<!\\d)" + Pattern.quote(numPart) + "厅");
+            if (p2.matcher(dbName).find()) {
+                return true;
+            }
+            // 也允许输入是完整厅名（如 "2号杜比厅"）
+            return input.length() > numPart.length() + 1 && dbName.contains(input);
+        }
+        // 非数字厅名：双向 contains
+        return dbName.contains(input) || input.contains(dbName);
     }
 
     @Override

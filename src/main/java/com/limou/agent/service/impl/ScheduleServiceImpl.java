@@ -26,6 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.Date;
 import java.sql.Time;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -84,6 +86,26 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         }
 
         List<Schedule> scheduleList = mapper.selectListByQuery(queryWrapper);
+        if (CollUtil.isEmpty(scheduleList)) {
+            return new ArrayList<>();
+        }
+
+        // ★ 过滤已过时的场次（今天已开场的场次不再展示）
+        LocalDateTime now = LocalDateTime.now();
+        scheduleList = scheduleList.stream()
+                .filter(s -> {
+                    if (s.getShowDate() == null || s.getStartTime() == null) return true;
+                    try {
+                        LocalDateTime showDateTime = LocalDateTime.of(
+                                s.getShowDate().toLocalDate(),
+                                LocalTime.parse(s.getStartTime().toString()));
+                        return showDateTime.isAfter(now);
+                    } catch (Exception e) {
+                        return true; // 解析失败保留，避免误杀
+                    }
+                })
+                .collect(Collectors.toList());
+
         if (CollUtil.isEmpty(scheduleList)) {
             return new ArrayList<>();
         }
@@ -282,6 +304,9 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         Set<Integer> vipRows = new HashSet<>();
         Set<String> vipCells = new HashSet<>();
         Map<Integer, Integer> rowOverrides = new HashMap<>();
+        Set<String> blockedCells = new HashSet<>();
+        List<Integer> aisleRows = new ArrayList<>();
+        List<Integer> aisleCols = new ArrayList<>();
     }
 
     private HallLayout parseHallLayout(Hall hall) {
@@ -312,6 +337,21 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
                         }
                     }
                 }
+                if (tmpl.containsKey("blockedCells")) {
+                    for (Object c : tmpl.getJSONArray("blockedCells")) {
+                        layout.blockedCells.add((String) c);
+                    }
+                }
+                if (tmpl.containsKey("aisleRows")) {
+                    for (Object r : tmpl.getJSONArray("aisleRows")) {
+                        layout.aisleRows.add(((Number) r).intValue());
+                    }
+                }
+                if (tmpl.containsKey("aisleCols")) {
+                    for (Object c : tmpl.getJSONArray("aisleCols")) {
+                        layout.aisleCols.add(((Number) c).intValue());
+                    }
+                }
             } catch (Exception ignored) {
             }
         }
@@ -323,6 +363,10 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         for (int row = 1; row <= layout.rowCount; row++) {
             int rowCols = layout.rowOverrides.getOrDefault(row, layout.colCount);
             for (int col = 1; col <= rowCols; col++) {
+                // 空位/柱子/缺口：不生成座位，colNum 仍保留物理格位置（前端按物理格遍历留白）
+                if (layout.blockedCells.contains(row + "," + col)) {
+                    continue;
+                }
                 Seat seat = new Seat();
                 seat.setScheduleId(schedule.getId());
                 seat.setHallId(hallId);

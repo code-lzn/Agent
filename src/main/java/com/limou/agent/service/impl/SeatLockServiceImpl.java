@@ -67,7 +67,7 @@ public class SeatLockServiceImpl implements SeatLockService {
         try {
             for (Seat seat : sorted) {
                 RLock lock = redissonClient.getLock(LOCK_KEY_PREFIX + scheduleId + ":" + seat.getId());
-                if (lock.tryLock(WAIT_SECONDS, leaseMinutes, TimeUnit.MINUTES)) {
+                if (lock.tryLock(WAIT_SECONDS, leaseMinutes * 60L, TimeUnit.SECONDS)) {
                     acquiredLocks.add(lock);
                 } else {
                     releaseLocks(acquiredLocks);

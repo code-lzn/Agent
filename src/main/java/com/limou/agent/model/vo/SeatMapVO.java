@@ -28,6 +28,21 @@ public class SeatMapVO implements Serializable {
     private Integer colCount;
 
     /**
+     * 横向过道（行间加宽）：这些行【之后】插入过道
+     */
+    private List<Integer> aisleRows;
+
+    /**
+     * 纵向过道（列间加宽）：这些列【之后】插入过道
+     */
+    private List<Integer> aisleCols;
+
+    /**
+     * 每行独立列数（缺省时用 colCount），用于按物理格遍历渲染
+     */
+    private java.util.Map<Integer, Integer> rowOverrides;
+
+    /**
      * 场次信息
      */
     private Long scheduleId;

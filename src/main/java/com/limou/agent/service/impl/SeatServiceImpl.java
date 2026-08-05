@@ -14,7 +14,10 @@ import com.limou.agent.service.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 座位 服务层实现。
@@ -67,6 +70,38 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements Se
         vo.setRowCount(hall.getRowCount());
         vo.setColCount(hall.getColCount());
         vo.setSeats(seats);
+        // 布局信息（从影厅 seatTemplate 带出，前端按物理格遍历渲染）
+        if (cn.hutool.core.util.StrUtil.isNotBlank(hall.getSeatTemplate())) {
+            try {
+                cn.hutool.json.JSONObject tmpl = new cn.hutool.json.JSONObject(hall.getSeatTemplate());
+                if (tmpl.containsKey("rowOverrides")) {
+                    cn.hutool.json.JSONObject overrides = tmpl.getJSONObject("rowOverrides");
+                    Map<Integer, Integer> rowOverrides = new HashMap<>();
+                    for (Map.Entry<String, Object> entry : overrides.entrySet()) {
+                        try {
+                            rowOverrides.put(Integer.parseInt(entry.getKey()), ((Number) entry.getValue()).intValue());
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    if (!rowOverrides.isEmpty()) vo.setRowOverrides(rowOverrides);
+                }
+                if (tmpl.containsKey("aisleRows")) {
+                    List<Integer> aisleRows = new ArrayList<>();
+                    for (Object r : tmpl.getJSONArray("aisleRows")) {
+                        aisleRows.add(((Number) r).intValue());
+                    }
+                    vo.setAisleRows(aisleRows);
+                }
+                if (tmpl.containsKey("aisleCols")) {
+                    List<Integer> aisleCols = new ArrayList<>();
+                    for (Object c : tmpl.getJSONArray("aisleCols")) {
+                        aisleCols.add(((Number) c).intValue());
+                    }
+                    vo.setAisleCols(aisleCols);
+                }
+            } catch (Exception ignored) {
+            }
+        }
 
         return vo;
     }

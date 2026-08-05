@@ -76,6 +76,16 @@ public class OrderController {
     }
 
     /**
+     * 模拟支付（跳过支付宝沙箱）—— 直接将订单标记为已支付。
+     */
+    @PostMapping("/mock-pay")
+    public BaseResponse<OrderVO> mockPay(@RequestBody PayOrderRequest request, HttpServletRequest httpRequest) {
+        Long userId = getLoginUserId(httpRequest);
+        OrderVO orderVO = orderService.mockPayOrder(request, userId);
+        return ResultUtils.success(orderVO);
+    }
+
+    /**
      * 订单详情。
      */
     @GetMapping("/{id}")
@@ -92,6 +102,16 @@ public class OrderController {
     public BaseResponse<Boolean> cancelOrder(@PathVariable Long id, HttpServletRequest httpRequest) {
         Long userId = getLoginUserId(httpRequest);
         orderService.cancelOrder(id, userId);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 用户删除订单（仅已退款/已取消可删除，软删除）。
+     */
+    @PostMapping("/delete/{id}")
+    public BaseResponse<Boolean> deleteOrder(@PathVariable Long id, HttpServletRequest httpRequest) {
+        Long userId = getLoginUserId(httpRequest);
+        orderService.deleteOrder(id, userId);
         return ResultUtils.success(true);
     }
 
@@ -134,6 +154,8 @@ public class OrderController {
                 .like("hallName", hallName, cn.hutool.core.util.StrUtil.isNotBlank(hallName))
                 .orderBy("createTime", false);
         Page<Order> orderPage = orderService.page(Page.of(pageNum, pageSize), qw);
+        // 填充「是否有已核销票」，前端据此隐藏/禁用退款入口
+        orderService.fillCheckedStatus(orderPage.getRecords());
         return ResultUtils.success(orderPage);
     }
 

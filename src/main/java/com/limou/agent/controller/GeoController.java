@@ -88,7 +88,7 @@ public class GeoController {
     @GetMapping("/reverse")
     public BaseResponse<Map<String, Object>> reverse(@RequestParam double lat,
                                                       @RequestParam double lng) {
-        String key = "74bfb724d417db45d5a9ffe7215eb4b1";
+        String key = amapWebServiceKey;
         Map<String, Object> result = new HashMap<>();
         try {
             String url = String.format(

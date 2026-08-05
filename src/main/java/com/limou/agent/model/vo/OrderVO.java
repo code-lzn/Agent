@@ -44,9 +44,21 @@ public class OrderVO implements Serializable {
     private Date paidAt;
     private Date expireAt;
     private Date createTime;
+    private BigDecimal refundAmount;
+    private Date refundTime;
+
+    /**
+     * 影院标签（逗号分隔），用于判断是否支持退票/改签
+     */
+    private String cinemaTags;
 
     /**
      * 座位标签列表（如：["5排6座", "5排7座"]）
      */
     private List<String> seatLabels;
+
+    /**
+     * 订单内的票列表（每座位一票，含独立取票码/核销状态）
+     */
+    private List<TicketVO> tickets;
 }
