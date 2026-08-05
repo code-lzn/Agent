@@ -7,6 +7,7 @@ import com.mybatisflex.core.service.IService;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -71,4 +72,9 @@ public interface TicketService extends IService<Ticket> {
      * 批量查询订单集合中「有已核销票」的订单ID（管理端列表填充用）。
      */
     Set<Long> getCheckedOrderIds(Collection<Long> orderIds);
+
+    /**
+     * 批量查订单的票（按 orderId 分组，含核销状态，用于列表一次查询）。
+     */
+    Map<Long, List<TicketVO>> getTicketsMapByOrderIds(Collection<Long> orderIds);
 }

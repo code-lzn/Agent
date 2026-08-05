@@ -25,8 +25,10 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -174,6 +176,19 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
                         .eq("status", TicketStatusEnum.CHECKED.getValue())
                         .select("orderId"))
                 .stream().map(Ticket::getOrderId).collect(Collectors.toSet());
+    }
+
+    @Override
+    public Map<Long, List<TicketVO>> getTicketsMapByOrderIds(Collection<Long> orderIds) {
+        if (CollUtil.isEmpty(orderIds)) {
+            return new HashMap<>();
+        }
+        List<Ticket> tickets = list(QueryWrapper.create().in("orderId", orderIds));
+        if (CollUtil.isEmpty(tickets)) {
+            return new HashMap<>();
+        }
+        return tickets.stream().collect(Collectors.groupingBy(Ticket::getOrderId,
+                Collectors.mapping(t -> buildTicketVO(t, null), Collectors.toList())));
     }
 
     @Override
