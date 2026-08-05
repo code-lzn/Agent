@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.mapper.FilmMapper;
 import com.limou.agent.model.dto.schedule.ConflictCheckRequest;
 import com.limou.agent.model.entity.Cinema;
 import com.limou.agent.model.entity.Film;
@@ -14,7 +15,9 @@ import com.limou.agent.model.vo.ScheduleVO;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.limou.agent.mapper.ScheduleMapper;
+import com.limou.agent.mapper.SeatMapper;
 import com.limou.agent.service.*;
+import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -46,6 +49,11 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Autowired
     @Lazy
     private SeatService seatService;
+    @Resource
+    private FilmMapper filmMapper;
+
+    @Autowired
+    private SeatMapper seatMapper;
 
     @Override
     public List<ScheduleVO> queryScheduleList(Long filmId, Long cinemaId, Date showDate) {
@@ -64,6 +72,13 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         if (filmId != null) {
             queryWrapper.eq("filmId", filmId);
         }
+        // 指定日期 → 精确匹配当天（C端日期 Tab）；未指定 → 从今天起全部未来场次
+        if (showDate != null) {
+            queryWrapper.eq("showDate", queryDate);
+        } else {
+            queryWrapper.ge("showDate", queryDate);
+        }
+
         if (cinemaId != null) {
             queryWrapper.eq("cinemaId", cinemaId);
         }
@@ -150,6 +165,10 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long saveScheduleWithSeats(Schedule schedule) {
+        // 0. 校验日期不能为过去 + 影院营业状态
+        checkShowDateNotPast(schedule.getShowDate());
+        checkCinemaOperable(schedule.getCinemaId());
+
         // 1. 保存排期
         boolean saved = super.save(schedule);
         if (!saved) {
@@ -162,21 +181,124 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
         }
 
-        // 3. 解析 seatTemplate 获取 VIP 行配置和行列覆盖
+        // 3. 解析 seatTemplate 并初始化座位（多行插入，一次往返）
+        HallLayout layout = parseHallLayout(hall);
+        seatMapper.batchInsertSeats(buildSeats(schedule, hall.getId(), layout));
+        return schedule.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchSaveWithSeats(List<Schedule> scheduleList) {
+        if (CollUtil.isEmpty(scheduleList)) {
+            return 0;
+        }
+
+        // 0. 校验影院营业状态（去重检查）+ 日期不能为过去，先于保存，快速失败
+        Set<Long> checkedCinemas = new HashSet<>();
+        for (Schedule s : scheduleList) {
+            if (checkedCinemas.add(s.getCinemaId())) {
+                checkCinemaOperable(s.getCinemaId());
+            }
+            checkShowDateNotPast(s.getShowDate());
+        }
+
+        // 1. 批量保存所有场次，拿到自增 ID（单事务 + 单批 SQL，避免逐条 INSERT 的网络往返）
+        boolean batchSaved = super.saveBatch(scheduleList);
+        if (!batchSaved) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "排期保存失败");
+        }
+
+        // 2. 按影厅一次性解析 seatTemplate（避免每条场次重复查厅/解析）
+        Map<Long, HallLayout> layoutMap = new HashMap<>();
+        for (Schedule s : scheduleList) {
+            if (layoutMap.containsKey(s.getHallId())) {
+                continue;
+            }
+            Hall hall = hallService.getById(s.getHallId());
+            if (hall == null || hall.getRowCount() == null || hall.getColCount() == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
+            }
+            layoutMap.put(hall.getId(), parseHallLayout(hall));
+        }
+
+        // 3. 为所有场次生成座位
+        List<Seat> allSeats = new ArrayList<>();
+        for (Schedule s : scheduleList) {
+            HallLayout layout = layoutMap.get(s.getHallId());
+            if (layout == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "影厅信息不完整，无法初始化座位");
+            }
+            allSeats.addAll(buildSeats(s, s.getHallId(), layout));
+        }
+
+        // 4. 一次性多行插入所有座位（单条 SQL、一次往返，避免逐行插入）
+        seatMapper.batchInsertSeats(allSeats);
+        return scheduleList.size();
+    }
+
+    /**
+     * 校验影院营业状态：仅「营业中(published)」的影院允许新增场次。
+     */
+    private void checkCinemaOperable(Long cinemaId) {
+        if (cinemaId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "影院不能为空");
+        }
+        Cinema cinema = cinemaService.getById(cinemaId);
+        if (cinema == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "影院不存在");
+        }
+        if (!"published".equals(cinema.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "影院「" + cinema.getName() + "」当前" + cinemaStatusText(cinema.getStatus()) + "，无法新增场次");
+        }
+    }
+
+    private String cinemaStatusText(String status) {
+        if ("published".equals(status)) {
+            return "营业中";
+        }
+        if ("offline".equals(status)) {
+            return "已停业";
+        }
+        return "未营业";
+    }
+
+    /**
+     * 校验放映日期不能是过去（今天及以后才允许排片）。
+     */
+    private void checkShowDateNotPast(Date showDate) {
+        if (showDate != null && showDate.before(Date.valueOf(LocalDate.now()))) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "不能新增过去的场次");
+        }
+    }
+
+    /**
+     * 影厅座位布局（从 seatTemplate 解析）。
+     */
+    private static class HallLayout {
+        int rowCount;
+        int colCount;
         Set<Integer> vipRows = new HashSet<>();
         Set<String> vipCells = new HashSet<>();
         Map<Integer, Integer> rowOverrides = new HashMap<>();
+    }
+
+    private HallLayout parseHallLayout(Hall hall) {
+        HallLayout layout = new HallLayout();
+        layout.rowCount = hall.getRowCount();
+        layout.colCount = hall.getColCount();
         if (cn.hutool.core.util.StrUtil.isNotBlank(hall.getSeatTemplate())) {
             try {
                 cn.hutool.json.JSONObject tmpl = new cn.hutool.json.JSONObject(hall.getSeatTemplate());
                 if (tmpl.containsKey("vipRows")) {
                     for (Object r : tmpl.getJSONArray("vipRows")) {
-                        vipRows.add((Integer) r);
+                        layout.vipRows.add((Integer) r);
                     }
                 }
                 if (tmpl.containsKey("vipCells")) {
                     for (Object c : tmpl.getJSONArray("vipCells")) {
-                        vipCells.add((String) c);
+                        layout.vipCells.add((String) c);
                     }
                 }
                 if (tmpl.containsKey("rowOverrides")) {
@@ -185,7 +307,7 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
                         try {
                             int r = Integer.parseInt(entry.getKey());
                             int c = ((Number) entry.getValue()).intValue();
-                            rowOverrides.put(r, c);
+                            layout.rowOverrides.put(r, c);
                         } catch (Exception ignored) {
                         }
                     }
@@ -193,29 +315,50 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             } catch (Exception ignored) {
             }
         }
+        return layout;
+    }
 
-        // 4. 批量初始化座位（支持逐行自定义列数）
+    private List<Seat> buildSeats(Schedule schedule, Long hallId, HallLayout layout) {
         List<Seat> seats = new ArrayList<>();
-        for (int row = 1; row <= hall.getRowCount(); row++) {
-            int rowCols = rowOverrides.getOrDefault(row, hall.getColCount());
+        for (int row = 1; row <= layout.rowCount; row++) {
+            int rowCols = layout.rowOverrides.getOrDefault(row, layout.colCount);
             for (int col = 1; col <= rowCols; col++) {
                 Seat seat = new Seat();
                 seat.setScheduleId(schedule.getId());
-                seat.setHallId(hall.getId());
+                seat.setHallId(hallId);
                 seat.setRowNum(row);
                 seat.setColNum(col);
                 seat.setSeatLabel(row + "排" + col + "座");
 
                 // 判断是否为 VIP 区
-                boolean isVip = vipRows.contains(row) || vipCells.contains(row + "," + col);
+                boolean isVip = layout.vipRows.contains(row) || layout.vipCells.contains(row + "," + col);
                 seat.setZone(isVip ? "vip" : "regular");
 
                 seat.setStatus("available");
                 seats.add(seat);
             }
         }
-
-        seatService.saveBatch(seats);
-        return schedule.getId();
+        return seats;
     }
+    @Override
+    public List<Film> getCinemaHotFilms(Long cinemaId) {
+        // 1. 查排片表中该影院的 filmId（去重）
+        List<Schedule> schedules = this.list(
+                QueryWrapper.create()
+                        .eq("cinemaId", cinemaId)
+                        .eq("status", "published")
+        );
+        if (CollUtil.isEmpty(schedules)) return new ArrayList<>();
+
+        Set<Long> filmIds = schedules.stream()
+                .map(Schedule::getFilmId)
+                .collect(Collectors.toSet());
+        // 2. 查 hot 影片
+        return filmMapper.selectListByQuery(
+                QueryWrapper.create()
+                        .in("id", filmIds)
+                        .eq("status", "hot")
+        );
+    }
+
 }
