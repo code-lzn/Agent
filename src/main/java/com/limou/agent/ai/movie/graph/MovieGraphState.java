@@ -1,5 +1,6 @@
 package com.limou.agent.ai.movie.graph;
 
+import cn.hutool.json.JSONUtil;
 import com.limou.agent.model.dto.movie.ConversationState;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -60,5 +61,19 @@ public class MovieGraphState implements Serializable {
      */
     public String getStateJson() {
         return convState != null ? convState.toJson() : null;
+    }
+
+    /**
+     * 锁座结果路由 key（条件边用）：成功 → "success"（自动创建订单），失败 → "fail"（结束）。
+     */
+    public String lockRouteKey() {
+        if (toolResult == null || toolResult.isBlank()) {
+            return "fail";
+        }
+        try {
+            return JSONUtil.parseObj(toolResult).getBool("success", false) ? "success" : "fail";
+        } catch (Exception e) {
+            return "fail";
+        }
     }
 }

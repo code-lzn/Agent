@@ -88,6 +88,11 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
                 if (state.getScheduleId() == null && state.getFilmId() != null) {
                     yield "search_schedule";
                 }
+                // 用户明确要"买X张票/要X个座位"（有票数或选座偏好）→ 直接自动锁座下单，而非只展示座位图
+                if ((state.getTicketCount() != null && state.getTicketCount() > 0)
+                        || has(state.getPreferredSeatZone())) {
+                    yield "lock_seats";
+                }
                 yield intent;
             }
             case "search_schedule" -> {
@@ -98,8 +103,12 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
                 yield intent;
             }
             case "lock_seats" -> {
+                // 缺座位且未表达选座偏好（中间/靠前等）与票数 → 降级展示座位图让用户手动选
+                // 有选座偏好或票数（如"帮我选中间3个座位"）→ 保留 lock_seats，由节点自动选座
                 if ((state.getSeatIds() == null || state.getSeatIds().isEmpty())
-                        && state.getScheduleId() != null) {
+                        && state.getScheduleId() != null
+                        && !has(state.getPreferredSeatZone())
+                        && state.getTicketCount() == null) {
                     yield "get_seat_map";
                 }
                 yield intent;

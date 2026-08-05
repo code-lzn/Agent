@@ -11,6 +11,9 @@ import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.deepseek.api.ResponseFormat;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -52,6 +55,13 @@ public class GraphIntentClassifier {
             - orderId: 订单ID（整数）
             - preferredSeatZone: 偏好座位区域（中间/靠前/靠后）
 
+            ## 选择动作与时段识别（重要）
+            - 用户说"选X厅/选X影院/选第几个/就选这个/那个/确认/可以"等选择或确认动作时，务必提取 hallType/hallName/cinemaName，意图识别为 get_seat_map 或 lock_seats
+            - "上午/中午/下午/晚上/凌晨"等时段词，换算成 startTime 填入（上午→09:00，中午→12:00，下午→14:00，晚上→19:00），供场次时间过滤
+
+            ## 当前日期
+            今天是：{today}（含星期）。用户提到"今天/明天/后天/某月某日/周几/几点/下午/晚上"等相对时间时，据此换算成具体日期填入 showDate/startTime。
+
             ## 当前对话状态
             {state}
 
@@ -73,7 +83,9 @@ public class GraphIntentClassifier {
      */
     public GraphIntentResult classify(String userMessage, ConversationState currentState) {
         String stateContext = currentState != null ? currentState.toPromptContext() : "无历史状态";
+        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
         String prompt = INTENT_PROMPT
+                .replace("{today}", today)
                 .replace("{state}", stateContext)
                 .replace("{input}", userMessage);
         //todo 结构化输出优化

@@ -106,21 +106,28 @@ public class MovieAgentController {
     }
 
     /**
-     * 同步座位页操作到 AI 状态 —— 用户在选座页手动下单后，让 AI 感知上下文
+     * 同步场次/座位操作到 AI 状态 —— 前端卡片选中场次、或选座页下单后，让 AI 感知上下文。
+     * scheduleId/orderId 均为可选：卡片选场次时只传 scheduleId，下单后额外传 orderId+seatLabels。
      */
     @PostMapping("/sync-state")
     public String syncState(@RequestParam Long userId,
-                            @RequestParam Long scheduleId,
-                            @RequestParam Long orderId,
-                            @RequestParam(required = false) String seatLabels) {
-        // 查找该用户当前会话
-        String conversationId = movieStateManager.findCurrentConversationId(userId);
+                            @RequestParam(required = false) Long scheduleId,
+                            @RequestParam(required = false) Long orderId,
+                            @RequestParam(required = false) String seatLabels,
+                            @RequestParam(required = false) String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) {
+            conversationId = movieStateManager.findCurrentConversationId(userId);
+        }
         if (conversationId == null) {
             return "{\"success\":false,\"message\":\"无活跃会话\"}";
         }
         ConversationState state = movieStateManager.getState(conversationId);
-        state.setScheduleId(scheduleId);
-        state.setOrderId(orderId);
+        if (scheduleId != null) {
+            state.setScheduleId(scheduleId);
+        }
+        if (orderId != null) {
+            state.setOrderId(orderId);
+        }
         if (seatLabels != null && !seatLabels.isBlank()) {
             state.setSeatLabels(java.util.Arrays.asList(seatLabels.split("、")));
         }

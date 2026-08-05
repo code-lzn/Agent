@@ -7,6 +7,10 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+
 /**
  * Graph 回复生成器
  * 仅用 LLM 生成自然语言回复，不持有工具
@@ -30,6 +34,9 @@ public class GraphResponseGenerator {
             - **绝对不要**让用户去找"锁定"按钮——页面上没有这个按钮
             - 当用户已在选座页面时，引导话术应为："选好座位后点击底部的「确认选座」就行啦～"
 
+            ## 当前日期
+            今天是：{today}（含星期）。用户问到日期/星期/时间相关问题时据此回答。
+
             ## 当前意图
             {intent}
 
@@ -48,6 +55,7 @@ public class GraphResponseGenerator {
             - 如果工具执行失败，安慰用户并给出建议
             - 如果是问候，热情回应
             - 如果是未知意图，引导用户说明需求
+            - **严禁编造**：票数/座位/价格/时间/影院等信息必须以工具结果或对话状态为准，缺失时如实告知并询问用户，不要臆测默认值（如"默认两张"）或编造具体座位号
             """;
 
     @Resource
@@ -58,7 +66,9 @@ public class GraphResponseGenerator {
      */
     public String generate(String intent, String userMessage, String toolResult, ConversationState state) {
         String stateContext = state != null ? state.toPromptContext() : "无";
+        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
         String prompt = RESPONSE_PROMPT
+                .replace("{today}", today)
                 .replace("{intent}", intent != null ? intent : "chat")
                 .replace("{tool_result}", toolResult != null && !toolResult.isEmpty() ? toolResult : "无工具结果")
                 .replace("{state}", stateContext)

@@ -75,7 +75,18 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
                     if (selected != null) return;
                     selected = session;
                 }
-            } else if (sessions.size() == 1) {
+            }
+            // ★ 文字选场次：按厅型/厅名/影院名匹配唯一场次写回（用户"选IMAX厅""选第二个"等）
+            if (selected == null && has(convState.getHallType())) {
+                selected = matchUnique(sessions, "hallType", convState.getHallType());
+            }
+            if (selected == null && has(convState.getHallName())) {
+                selected = matchUnique(sessions, "hallName", convState.getHallName());
+            }
+            if (selected == null && has(convState.getCinemaName())) {
+                selected = matchUnique(sessions, "cinemaName", convState.getCinemaName());
+            }
+            if (selected == null && sessions.size() == 1) {
                 selected = sessions.getJSONObject(0);
             }
 
@@ -99,5 +110,25 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
         } catch (Exception ignored) {
             return requestedTime.equals(actualTime);
         }
+    }
+
+    /** 按指定字段匹配唯一场次（多个匹配返回 null，不写回避免误选） */
+    private JSONObject matchUnique(JSONArray sessions, String field, String value) {
+        JSONObject matched = null;
+        for (int i = 0; i < sessions.size(); i++) {
+            JSONObject session = sessions.getJSONObject(i);
+            String v = session.getStr(field);
+            if (v != null && (v.equals(value) || v.contains(value) || value.contains(v))) {
+                if (matched != null) {
+                    return null; // 多个匹配 → 不确定用户选哪个，不写回
+                }
+                matched = session;
+            }
+        }
+        return matched;
+    }
+
+    private boolean has(String s) {
+        return s != null && !s.isEmpty();
     }
 }
