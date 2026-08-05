@@ -124,6 +124,10 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
         if (st != null && TicketStatusEnum.REFUNDED == TicketStatusEnum.getEnumByValue(st)) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "该票已退票，无法核销");
         }
+        // 已过期（落库 status=3，由定时任务写入；未落库时走下方 isExpired 动态判定）
+        if (st != null && TicketStatusEnum.EXPIRED == TicketStatusEnum.getEnumByValue(st)) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "该票已过期，无法核销");
+        }
         if (isExpired(ticket)) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "该票已过期，无法核销");
         }
