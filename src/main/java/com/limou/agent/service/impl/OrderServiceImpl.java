@@ -5,7 +5,6 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.mybatisflex.core.paginate.Page;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
@@ -16,6 +15,7 @@ import com.limou.agent.model.dto.order.PayOrderRequest;
 import com.limou.agent.model.entity.*;
 import com.limou.agent.model.vo.OrderVO;
 import com.limou.agent.model.vo.PayOrderVO;
+import com.limou.agent.model.vo.SeatLockResult;
 import com.limou.agent.service.*;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
@@ -63,6 +63,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Autowired
     private SystemConfigService systemConfigService;
 
+    @Autowired
+    private SeatLockService seatLockService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean lockSeat(LockSeatRequest request, Long userId) {
@@ -76,30 +79,15 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "场次不存在");
         }
 
-        // 用行锁查询座位（FOR UPDATE），防止并发超卖
-        QueryWrapper qw = QueryWrapper.create()
-                .eq("scheduleId", request.getScheduleId())
-                .in("id", request.getSeatIds())
-                .hint("FOR UPDATE");
-        List<Seat> seats = seatService.list(qw);
-
-        if (seats.size() != request.getSeatIds().size()) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "部分座位不存在");
+        // Redis 锁 + 乐观锁（替代 FOR UPDATE 行锁）
+        SeatLockResult lockResult = seatLockService.lockSeats(
+                request.getScheduleId(), request.getSeatIds(), getLockDuration());
+        if (!lockResult.isSuccess()) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "锁座失败：" + formatLockError(lockResult));
         }
-
-        // 检查是否全部可用
-        for (Seat seat : seats) {
-            if (!"available".equals(seat.getStatus())) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "座位 " + seat.getSeatLabel() + " 已被锁定或售出");
-            }
-        }
-
-        // 锁定座位
-        List<Seat> updateList = seats.stream().peek(s -> s.setStatus("locked")).collect(Collectors.toList());
-        seatService.updateBatch(updateList);
-
         log.info("用户 {} 锁定场次 {} 座位: {}", userId, request.getScheduleId(),
-                seats.stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
+                lockResult.getLockedSeats().stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
         return true;
     }
 
@@ -116,80 +104,77 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "场次不存在");
         }
 
-        // 2. 验证并锁定座位（行锁）
-        QueryWrapper qw = QueryWrapper.create()
-                .eq("scheduleId", request.getScheduleId())
-                .in("id", request.getSeatIds())
-                .hint("FOR UPDATE");
-        List<Seat> seats = seatService.list(qw);
+        // 2. 锁座（Redis 锁 + 乐观锁，替代 FOR UPDATE 行锁）
+        SeatLockResult lockResult = seatLockService.lockSeats(
+                request.getScheduleId(), request.getSeatIds(), getLockDuration());
+        if (!lockResult.isSuccess()) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "座位已被占用：" + formatLockError(lockResult));
+        }
+        List<Seat> seats = lockResult.getLockedSeats();
 
-        // 检查座位状态（available 或 locked 均可 — 如果是locked得是当前用户锁的，简化：允许锁定状态的也可直接下单）
-        for (Seat seat : seats) {
-            String status = seat.getStatus();
-            if (!"available".equals(status) && !"locked".equals(status)) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "座位 " + seat.getSeatLabel() + " 已售出");
+        try {
+            // 3. 计算总价
+            int count = seats.size();
+            if (schedule.getPrice() == null) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "场次票价未设置");
             }
+            BigDecimal totalPrice;
+            boolean hasVip = seats.stream().anyMatch(s -> "vip".equals(s.getZone()));
+            if (hasVip && schedule.getVipPrice() != null) {
+                long vipCount = seats.stream().filter(s -> "vip".equals(s.getZone())).count();
+                long regularCount = count - vipCount;
+                totalPrice = schedule.getVipPrice().multiply(BigDecimal.valueOf(vipCount))
+                        .add(schedule.getPrice().multiply(BigDecimal.valueOf(regularCount)));
+            } else {
+                totalPrice = schedule.getPrice().multiply(BigDecimal.valueOf(count));
+            }
+
+            // 4. 获取关联信息
+            Film film = filmService.getById(schedule.getFilmId());
+            Cinema cinema = cinemaService.getById(schedule.getCinemaId());
+            Hall hall = hallService.getById(schedule.getHallId());
+
+            // 5. 生成订单号
+            String orderNo = IdUtil.getSnowflakeNextIdStr();
+
+            // 6. 创建订单
+            Order order = Order.builder()
+                    .orderNo(orderNo)
+                    .userId(userId)
+                    .scheduleId(request.getScheduleId())
+                    .filmName(film != null ? film.getName() : null)
+                    .cinemaName(cinema != null ? cinema.getName() : null)
+                    .scheduleTime(schedule.getShowDate() + " " + schedule.getStartTime())
+                    .hallName(hall != null ? hall.getName() : null)
+                    .totalPrice(totalPrice)
+                    .count(count)
+                    .status("pending")
+                    .expireAt(LocalDateTime.now().plusMinutes(getLockDuration()))
+                    .build();
+            this.save(order);
+
+            // 7. 创建订单-座位关联
+            List<OrderSeat> orderSeats = seats.stream().map(seat -> {
+                OrderSeat os = new OrderSeat();
+                os.setOrderId(order.getId());
+                os.setSeatId(seat.getId());
+                os.setSeatLabel(seat.getSeatLabel());
+                os.setIsUsed(false);
+                return os;
+            }).collect(Collectors.toList());
+            orderSeatService.saveBatch(orderSeats);
+            // 座位状态已由 lockSeats 置为 locked，无需重复更新
+
+            log.info("用户 {} 创建订单 {}，座位: {}", userId, orderNo,
+                    seats.stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
+
+            return buildOrderVO(order, seats);
+        } catch (Exception e) {
+            // 后续步骤失败 → 释放 Redis 锁（座位状态由事务回滚）
+            seatLockService.releaseSeats(request.getScheduleId(), request.getSeatIds());
+            throw e;
         }
-
-        // 3. 计算总价
-        int count = seats.size();
-        if (schedule.getPrice() == null) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "场次票价未设置");
-        }
-        BigDecimal totalPrice;
-        boolean hasVip = seats.stream().anyMatch(s -> "vip".equals(s.getZone()));
-        if (hasVip && schedule.getVipPrice() != null) {
-            long vipCount = seats.stream().filter(s -> "vip".equals(s.getZone())).count();
-            long regularCount = count - vipCount;
-            totalPrice = schedule.getVipPrice().multiply(BigDecimal.valueOf(vipCount))
-                    .add(schedule.getPrice().multiply(BigDecimal.valueOf(regularCount)));
-        } else {
-            totalPrice = schedule.getPrice().multiply(BigDecimal.valueOf(count));
-        }
-
-        // 4. 获取关联信息
-        Film film = filmService.getById(schedule.getFilmId());
-        Cinema cinema = cinemaService.getById(schedule.getCinemaId());
-        Hall hall = hallService.getById(schedule.getHallId());
-
-        // 5. 生成订单号
-        String orderNo = IdUtil.getSnowflakeNextIdStr();
-
-        // 6. 创建订单
-        Order order = Order.builder()
-                .orderNo(orderNo)
-                .userId(userId)
-                .scheduleId(request.getScheduleId())
-                .filmName(film != null ? film.getName() : null)
-                .cinemaName(cinema != null ? cinema.getName() : null)
-                .scheduleTime(schedule.getShowDate() + " " + schedule.getStartTime())
-                .hallName(hall != null ? hall.getName() : null)
-                .totalPrice(totalPrice)
-                .count(count)
-                .status("pending")
-                .expireAt(LocalDateTime.now().plusMinutes(15))
-                .build();
-        this.save(order);
-
-        // 7. 创建订单-座位关联
-        List<OrderSeat> orderSeats = seats.stream().map(seat -> {
-            OrderSeat os = new OrderSeat();
-            os.setOrderId(order.getId());
-            os.setSeatId(seat.getId());
-            os.setSeatLabel(seat.getSeatLabel());
-            os.setIsUsed(false);
-            return os;
-        }).collect(Collectors.toList());
-        orderSeatService.saveBatch(orderSeats);
-
-        // 8. 更新座位状态为已锁定（如果是available则改为locked）
-        seats.forEach(s -> s.setStatus("locked"));
-        seatService.updateBatch(seats);
-
-        log.info("用户 {} 创建订单 {}，座位: {}", userId, orderNo,
-                seats.stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
-
-        return buildOrderVO(order, seats);
     }
 
     @Override
@@ -293,9 +278,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             List<OrderSeat> orderSeats = orderSeatService.list(sqw);
             List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
             if (CollUtil.isNotEmpty(seatIds)) {
-                List<Seat> seats = seatService.listByIds(seatIds);
-                seats.forEach(s -> s.setStatus("available"));
-                seatService.updateBatch(seats);
+                // 释放座位 + Redis 锁（统一走锁服务）
+                seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
             }
         }
 
@@ -331,9 +315,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         List<OrderSeat> orderSeats = orderSeatService.list(sqw);
         List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
         if (CollUtil.isNotEmpty(seatIds)) {
-            List<Seat> seats = seatService.listByIds(seatIds);
-            seats.forEach(s -> s.setStatus("available"));
-            seatService.updateBatch(seats);
+            // 释放座位 + Redis 锁（统一走锁服务）
+            seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
         }
 
         log.info("用户 {} 取消订单 {}，释放 {} 个座位", userId, order.getOrderNo(), seatIds.size());
@@ -384,9 +367,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         List<OrderSeat> orderSeats = orderSeatService.list(sqw);
         List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
         if (CollUtil.isNotEmpty(seatIds)) {
-            List<Seat> seats = seatService.listByIds(seatIds);
-            seats.forEach(s -> s.setStatus("available"));
-            seatService.updateBatch(seats);
+            // 释放座位 + Redis 锁（统一走锁服务）
+            seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
         }
         log.info("用户 {} 退款成功，订单号: {}, 退款金额: {}", userId, order.getOrderNo(), refundAmount);
     }
@@ -442,9 +424,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         List<OrderSeat> orderSeats = orderSeatService.list(sqw);
         List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
         if (CollUtil.isNotEmpty(seatIds)) {
-            List<Seat> seats = seatService.listByIds(seatIds);
-            seats.forEach(s -> s.setStatus("available"));
-            seatService.updateBatch(seats);
+            // 释放座位 + Redis 锁（统一走锁服务）
+            seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
         }
 
         log.info("管理员取消/退款订单 {}（{}），释放 {} 个座位", order.getOrderNo(), reason, orderSeats.size());
@@ -462,18 +443,43 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
      * 读取可退款时限（小时），默认 24 小时。配置键：refundTimeoutHours
      */
     private int getRefundTimeoutHours() {
+        return readIntConfig("refundTimeoutHours", 24);
+    }
+
+    /**
+     * 读取锁座时长（分钟），即待支付订单超时时间，默认 15 分钟。配置键：lockDuration
+     */
+    private int getLockDuration() {
+        return readIntConfig("lockDuration", 15);
+    }
+
+    /**
+     * 读取整型系统配置。配置值可能是裸数字（如 20）或带引号的 JSON 数字，统一容错解析。
+     */
+    private int readIntConfig(String configKey, int defaultValue) {
         try {
             SystemConfig config = systemConfigService.getOne(
-                    QueryWrapper.create().eq("configKey", "refundTimeoutHours"));
+                    QueryWrapper.create().eq("configKey", configKey));
             if (config == null || StrUtil.isBlank(config.getConfigValue())) {
-                return 24;
+                return defaultValue;
             }
-            Object val = JSONUtil.parse(config.getConfigValue());
-            return val instanceof Number ? ((Number) val).intValue() : Integer.parseInt(val.toString());
+            String v = config.getConfigValue().trim().replaceAll("[\"']", "");
+            return Integer.parseInt(v);
         } catch (Exception e) {
-            log.warn("读取退款时限配置失败，使用默认 24 小时", e);
-            return 24;
+            log.warn("读取配置 {} 失败，使用默认 {}", configKey, defaultValue, e);
+            return defaultValue;
         }
+    }
+
+    /**
+     * 格式化锁座失败提示（拼接冲突座位标签）。
+     */
+    private String formatLockError(SeatLockResult result) {
+        List<String> labels = result.getConflictSeatLabels();
+        if (labels == null || labels.isEmpty()) {
+            return "座位已被占用，请重新选座";
+        }
+        return String.join("；", labels);
     }
 
     /**

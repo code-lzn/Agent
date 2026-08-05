@@ -2,6 +2,7 @@ package com.limou.agent.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.lang.Validator;
 import cn.hutool.core.util.StrUtil;
 import com.limou.agent.constant.UserConstant;
 import com.limou.agent.exception.BusinessException;
@@ -204,7 +205,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     // ==================== sendMailCode ====================
     @Override
     public void sendMailCode(String email) {
-        if (StrUtil.isBlank(email) || !email.contains("@")) {
+        if (!Validator.isEmail(email)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
         }
         // 60 秒内不允许重发
@@ -237,7 +238,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (StrUtil.isBlank(email) || StrUtil.isBlank(code)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
         }
-        if (!email.contains("@")) {
+        if (!Validator.isEmail(email)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
         }
         String codeKey = UserConstant.MAIL_CODE_PREFIX + email;
@@ -271,6 +272,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     public void resetPassword(String email, String code, String newPassword, String checkPassword) {
         if (StrUtil.hasBlank(email, code, newPassword, checkPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
+        }
+        if (!Validator.isEmail(email)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "邮箱格式不正确");
         }
         if (newPassword.length() < 8) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码至少8位");

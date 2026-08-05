@@ -2,20 +2,19 @@ package com.limou.agent.scheduler;
 
 import com.limou.agent.mapper.OrderMapper;
 import com.limou.agent.mapper.OrderSeatMapper;
-import com.limou.agent.mapper.SeatMapper;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.OrderSeat;
-import com.limou.agent.model.entity.Seat;
+import com.limou.agent.service.SeatLockService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 订单超时取消调度器
@@ -34,10 +33,7 @@ public class OrderTimeoutScheduler {
     private OrderSeatMapper orderSeatMapper;
 
     @Resource
-    private SeatMapper seatMapper;
-
-    @Resource
-    private RedissonClient redissonClient;
+    private SeatLockService seatLockService;
 
     /**
      * 每 30 秒处理一次过期订单
@@ -75,7 +71,7 @@ public class OrderTimeoutScheduler {
     }
 
     /**
-     * 取消单个订单并释放座位
+     * 取消单个订单并释放座位（座位 + Redis 锁统一走 SeatLockService）
      */
     private void cancelSingleOrder(Order order) {
         Long orderId = order.getId();
@@ -85,22 +81,12 @@ public class OrderTimeoutScheduler {
                 QueryWrapper.create().eq(OrderSeat::getOrderId, orderId)
         );
 
-        // 3. 释放座位：将状态从 locked 改为 available
-        for (OrderSeat os : orderSeats) {
-            seatMapper.updateByQuery(
-                    Seat.builder().status("available").build(),
-                    QueryWrapper.create()
-                            .eq(Seat::getId, os.getSeatId())
-                            .eq(Seat::getStatus, "locked")
-            );
-
-            // 释放 Redis 分布式锁
-            try {
-                String lockKey = "seat:lock:" + order.getScheduleId() + ":" + os.getSeatId();
-                redissonClient.getLock(lockKey).forceUnlock();
-            } catch (Exception e) {
-                log.debug("释放 Redis 锁失败（可能已过期）: orderId={}, seatId={}", orderId, os.getSeatId());
-            }
+        // 3. 释放座位 + Redis 锁
+        if (!orderSeats.isEmpty()) {
+            List<Long> seatIds = orderSeats.stream()
+                    .map(OrderSeat::getSeatId)
+                    .collect(Collectors.toList());
+            seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
         }
 
         // 4. 更新订单状态为已取消
