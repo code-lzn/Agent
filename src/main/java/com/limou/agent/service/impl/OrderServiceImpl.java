@@ -66,6 +66,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Autowired
     private SeatLockService seatLockService;
 
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean lockSeat(LockSeatRequest request, Long userId) {
@@ -201,6 +202,51 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         log.info("订单 {} 生成支付宝支付页面", order.getOrderNo());
 
         return new PayOrderVO(payForm, order.getOrderNo());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public OrderVO mockPayOrder(PayOrderRequest request, Long userId) {
+        if (request == null || request.getOrderId() == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数无效");
+        }
+
+        Order order = this.getById(request.getOrderId());
+        if (order == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        }
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
+        }
+        if (!"pending".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅待支付订单可模拟支付");
+        }
+
+        // 模拟支付：直接标记为已支付
+        order.setStatus("paid");
+        order.setPaidAt(LocalDateTime.now());
+        order.setAlipayTradeNo("MOCK_" + IdUtil.getSnowflakeNextIdStr());
+        order.setAlipayStatus("TRADE_SUCCESS");
+        this.updateById(order);
+
+        // 更新座位为已售
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
+        if (CollUtil.isNotEmpty(seatIds)) {
+            List<Seat> seats = seatService.listByIds(seatIds);
+            seats.forEach(s -> s.setStatus("sold"));
+            seatService.updateBatch(seats);
+        }
+
+        log.info("用户 {} 模拟支付成功，订单号: {}", userId, order.getOrderNo());
+
+        List<String> seatLabels = orderSeats.stream()
+                .map(OrderSeat::getSeatLabel)
+                .collect(Collectors.toList());
+        OrderVO vo = buildOrderVO(order, null);
+        vo.setSeatLabels(seatLabels);
+        return vo;
     }
 
     @Override
@@ -341,36 +387,67 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if ("refunded".equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已退款，不可重复操作");
         }
+        if ("expired".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法退票");
+        }
+
+        // 开场前1分钟内不可退票
         try {
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
-            if (showTime.isBefore(LocalDateTime.now())) {
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法退款");
+            long diffMinutes = java.time.Duration.between(LocalDateTime.now(), showTime).toMinutes();
+            if (diffMinutes < 1) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "开场前1分钟内不支持退票");
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("解析放映时间失败，跳过开场校验: {}", order.getScheduleTime(), e);
+            log.warn("解析放映时间失败: {}", order.getScheduleTime(), e);
         }
-        String refundAmount = order.getTotalPrice().toString();
-        boolean refundSuccess = alipayService.refund(order.getOrderNo(), refundAmount, order.getAlipayTradeNo());
-        if (!refundSuccess) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
+
+        BigDecimal refundAmount = order.getTotalPrice();
+        int count = order.getCount() != null ? order.getCount() : 1;
+
+        String tradeNo = order.getAlipayTradeNo();
+        if (tradeNo == null || tradeNo.startsWith("MOCK_")) {
+            order.setStatus("refunded");
+            order.setCancelReason("退票");
+            order.setRefundAmount(refundAmount);
+            order.setRefundTime(LocalDateTime.now());
+            this.updateById(order);
+        } else {
+            boolean refundSuccess = alipayService.refund(order.getOrderNo(), refundAmount.toString(), tradeNo);
+            if (!refundSuccess) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
+            }
+            order.setStatus("refunded");
+            order.setCancelReason("退票");
+            order.setRefundAmount(refundAmount);
+            order.setRefundTime(LocalDateTime.now());
+            this.updateById(order);
         }
-        order.setStatus("refunded");
-        order.setCancelReason("user_refund");
-        order.setRefundAmount(order.getTotalPrice());
-        order.setRefundTime(LocalDateTime.now());
-        this.updateById(order);
 
         QueryWrapper sqw = QueryWrapper.create().eq("orderId", orderId);
         List<OrderSeat> orderSeats = orderSeatService.list(sqw);
         List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
         if (CollUtil.isNotEmpty(seatIds)) {
-            // 释放座位 + Redis 锁（统一走锁服务）
             seatLockService.releaseSeatsToAvailable(order.getScheduleId(), seatIds);
         }
-        log.info("用户 {} 退款成功，订单号: {}, 退款金额: {}", userId, order.getOrderNo(), refundAmount);
+        log.info("用户 {} 退票成功，订单号: {}, {}张, 退款{}元",
+                userId, order.getOrderNo(), count, refundAmount);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteOrder(Long orderId, Long userId) {
+        Order order = this.getById(orderId);
+        if (order == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        if (!order.getUserId().equals(userId)) throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        if ("pending".equals(order.getStatus()) || "paid".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅已退款、已取消或已过期的订单可删除");
+        }
+        this.removeById(orderId);
+        log.info("用户 {} 删除订单 {}", userId, order.getOrderNo());
     }
 
     @Override
@@ -392,6 +469,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         if ("completed".equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "已完成订单无法取消");
+        }
+        if ("expired".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法操作");
         }
 
         // PRD 3.3.5 交互规则③：退款校验读取系统配置退款策略，超出可退款时限禁止退款
@@ -495,10 +575,19 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order.getScheduleId() != null) {
             try {
                 Schedule schedule = scheduleService.getById(order.getScheduleId());
-                if (schedule != null && schedule.getFilmId() != null) {
-                    Film film = filmService.getById(schedule.getFilmId());
-                    if (film != null) {
-                        vo.setPosterUrl(film.getPosterUrl());
+                if (schedule != null) {
+                    if (schedule.getFilmId() != null) {
+                        Film film = filmService.getById(schedule.getFilmId());
+                        if (film != null) {
+                            vo.setPosterUrl(film.getPosterUrl());
+                        }
+                    }
+                    // 影院标签：通过 场次→影院 获取
+                    if (schedule.getCinemaId() != null) {
+                        Cinema cinema = cinemaService.getById(schedule.getCinemaId());
+                        if (cinema != null) {
+                            vo.setCinemaTags(cinema.getTags());
+                        }
                     }
                 }
             } catch (Exception e) {
