@@ -46,6 +46,11 @@ public interface OrderService extends IService<Order> {
     PayOrderVO payOrder(PayOrderRequest request, Long userId);
 
     /**
+     * 模拟支付（跳过支付宝）—— 直接将订单标记为已支付。
+     */
+    OrderVO mockPayOrder(PayOrderRequest request, Long userId);
+
+    /**
      * 获取订单详情。
      *
      * @param orderId 订单ID
@@ -77,6 +82,11 @@ public interface OrderService extends IService<Order> {
      * @param userId  用户ID
      */
     void cancelOrder(Long orderId, Long userId);
+
+    /**
+     * 用户删除订单（软删除，仅 refunded/cancelled/completed 可删）。
+     */
+    void deleteOrder(Long orderId, Long userId);
 
     /**
      * 取消指定订单（管理员取消/退款），释放座位。
