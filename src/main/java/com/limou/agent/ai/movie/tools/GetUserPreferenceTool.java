@@ -7,6 +7,7 @@ import com.limou.agent.mapper.OrderMapper;
 import com.limou.agent.mapper.UserPreferenceMapper;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.UserPreference;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -63,7 +64,7 @@ public class GetUserPreferenceTool extends BaseTool {
             // 2. 查询最近 5 笔订单，分析购票习惯
             QueryWrapper orderWrapper = QueryWrapper.create()
                     .eq(Order::getUserId, userId)
-                    .eq(Order::getStatus, "paid")
+                    .eq(Order::getStatus, OrderStatusEnum.PAID.getValue())
                     .orderBy(Order::getCreateTime, false)
                     .limit(5);
 

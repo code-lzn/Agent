@@ -36,27 +36,18 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
         ConversationState convState = state.getConvState();
 
         // ★ 安全网：filmId 未解析时不能查场次（否则会查出全部场次）
-        if (convState.getFilmId() == null && convState.getFilmName() != null) {
-            String error = "{\"error\":\"请先确认影片\",\"filmName\":\""
-                    + convState.getFilmName() + "\"}";
+        if (convState.getFilmId() == null) {
+            String error = "{\"error\":\"请先确认影片\"}";
             state.setToolResult(error);
             state.setToolName(MovieIntent.SEARCH_SCHEDULE.getCode());
-            log.warn("SearchSchedule 被阻止: filmId=null, filmName={}, conversationId={}",
-                    convState.getFilmName(), state.getConversationId());
-            return state;
-        }
-
-        // ★ 安全网：cinemaId 未解析时不能查场次（用户可能没选影院，查全城场次体验差）
-        if (convState.getCinemaId() == null && convState.getCinemaName() == null) {
-            String error = "{\"error\":\"请先选择影院\",\"diagnosis\":\"cinema_required\",\"hint\":\"用户尚未指定影院，请引导用户选择观影城市和影院后再查场次\"}";
-            state.setToolResult(error);
-            state.setToolName(MovieIntent.SEARCH_SCHEDULE.getCode());
-            log.warn("SearchSchedule 被阻止: cinemaId=null, cinemaName=null, conversationId={}",
+            log.warn("SearchSchedule 被阻止: filmId=null, conversationId={}",
                     state.getConversationId());
             return state;
         }
 
-        // ★ 安全网：有影院名但缺 cinemaId，提示先查影院
+        // ★ 影院名有值但未解析到 ID：先调用 searchCinemas 解析，避免全城误查
+        //（cinemaId 和 cinemaName 都为空时放行——用户问"哪家影院有场次"时查询全部影院，
+        //  返回结果带 cinemaName，由 AI 据此推荐有场次的影院）
         if (convState.getCinemaId() == null && convState.getCinemaName() != null) {
             String error = "{\"error\":\"影院ID缺失，请先调用 searchCinemas 获取影院ID\",\"cinemaName\":\""
                     + convState.getCinemaName() + "\",\"diagnosis\":\"cinema_id_missing\"}";
@@ -96,7 +87,18 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
                     if (selected != null) return;
                     selected = session;
                 }
-            } else if (sessions.size() == 1) {
+            }
+            // ★ 文字选场次：按厅型/厅名/影院名匹配唯一场次写回（用户"选IMAX厅""选第二个"等）
+            if (selected == null && has(convState.getHallType())) {
+                selected = matchUnique(sessions, "hallType", convState.getHallType());
+            }
+            if (selected == null && has(convState.getHallName())) {
+                selected = matchUnique(sessions, "hallName", convState.getHallName());
+            }
+            if (selected == null && has(convState.getCinemaName())) {
+                selected = matchUnique(sessions, "cinemaName", convState.getCinemaName());
+            }
+            if (selected == null && sessions.size() == 1) {
                 selected = sessions.getJSONObject(0);
             }
 
@@ -105,9 +107,19 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
             convState.setHallName(selected.getStr("hallName"));
             convState.setShowDate(selected.getStr("showDate", convState.getShowDate()));
             convState.setStartTime(selected.getStr("startTime", convState.getStartTime()));
+            // 补全 filmId/filmName：解决选场次后 state 里 filmId=null 的问题
+            if (selected.getLong("filmId") != null && convState.getFilmId() == null) {
+                convState.setFilmId(selected.getLong("filmId"));
+            }
+            if (selected.getStr("cinemaId") != null && convState.getCinemaId() == null) {
+                convState.setCinemaId(selected.getLong("cinemaId"));
+            }
+            if (selected.getStr("cinemaName") != null && convState.getCinemaName() == null) {
+                convState.setCinemaName(selected.getStr("cinemaName"));
+            }
             stateManager.saveState(conversationId, convState);
-            log.info("SearchSchedule 写回 scheduleId={}: conversationId={}",
-                    convState.getScheduleId(), conversationId);
+            log.info("SearchSchedule 写回 scheduleId={}, filmId={}: conversationId={}",
+                    convState.getScheduleId(), convState.getFilmId(), conversationId);
         } catch (Exception e) {
             log.warn("SearchSchedule 结果解析失败，跳过场次写回: conversationId={}", conversationId, e);
         }
@@ -120,5 +132,25 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
         } catch (Exception ignored) {
             return requestedTime.equals(actualTime);
         }
+    }
+
+    /** 按指定字段匹配唯一场次（多个匹配返回 null，不写回避免误选） */
+    private JSONObject matchUnique(JSONArray sessions, String field, String value) {
+        JSONObject matched = null;
+        for (int i = 0; i < sessions.size(); i++) {
+            JSONObject session = sessions.getJSONObject(i);
+            String v = session.getStr(field);
+            if (v != null && (v.equals(value) || v.contains(value) || value.contains(v))) {
+                if (matched != null) {
+                    return null; // 多个匹配 → 不确定用户选哪个，不写回
+                }
+                matched = session;
+            }
+        }
+        return matched;
+    }
+
+    private boolean has(String s) {
+        return s != null && !s.isEmpty();
     }
 }

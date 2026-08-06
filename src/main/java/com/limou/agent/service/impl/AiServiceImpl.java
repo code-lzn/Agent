@@ -11,6 +11,7 @@ import com.limou.agent.ai.movie.WorkflowDecision;
 import com.limou.agent.ai.movie.graph.MovieGraphWorkflow;
 import com.limou.agent.ai.movie.graph.MovieIntent;
 import com.limou.agent.ai.movie.graph.GraphResponseGenerator;
+import com.limou.agent.ai.movie.graph.GraphIntentClassifier;
 import com.limou.agent.ai.movie.graph.GraphIntentResult;
 import com.limou.agent.ai.movie.graph.SmartMovieRouter;
 import com.limou.agent.ai.movie.graph.SmartRouteResult;
@@ -32,6 +33,8 @@ import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -64,6 +67,9 @@ public class AiServiceImpl implements AiService {
 
     @Resource
     private SmartMovieRouter smartMovieRouter;
+
+    @Resource
+    private GraphIntentClassifier intentClassifier;
 
     @Resource
     private ChatHistoryService chatHistoryService;
@@ -182,6 +188,21 @@ public class AiServiceImpl implements AiService {
                 + "\n\n## 当前用户\n"
                 + "当前登录用户ID: " + userId + "\n"
                 + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
+
+        // ★ ReAct 前用意图分类器提取槽位写回状态（ReAct 工具调用不写全票数/座位偏好等，
+        //   需提前写入，保证下一轮 Graph（如"帮我下单"）能接力拿到 cinemaId/scheduleId/ticketCount）
+        try {
+            GraphIntentResult intentResult = intentClassifier.classify(
+                    message, movieStateManager.getState(conversationId));
+            if (intentResult.getSlots() != null) {
+                movieStateManager.mergeState(conversationId, intentResult.getSlots());
+                log.info("ReAct 前置槽位写回: conversationId={}, intent={}",
+                        conversationId, intentResult.getIntent());
+            }
+        } catch (Exception e) {
+            log.warn("ReAct 前置槽位提取失败: conversationId={}", conversationId, e);
+        }
+
         StringBuilder fullResponse = new StringBuilder();
         // ★ 捕获卡片数据用于持久化（Lambda 内只能引用 effectively-final 变量，用数组做容器）
         final String[] lastCardType = {null};
@@ -310,13 +331,27 @@ public class AiServiceImpl implements AiService {
             toolResultForPrompt = "工具执行结果：" + cardError + "。原始数据：" + (toolResult != null ? toolResult : "无");
             antiJsonRule = "\n\n## 重要规则\n工具执行结果为空或失败（" + cardError + "）。必须如实告知用户没有找到匹配结果，**严禁**用对话状态中的历史信息编造"+"找到了XXX"+"之类的虚假回复。引导用户换个条件试试。不要输出JSON。";
         } else if (hasCard) {
-            toolResultForPrompt = "已通过前端卡片展示";
-            antiJsonRule = "\n\n## 重要规则\n工具执行结果已通过可视化卡片在前端展示，你**不要**重复输出数据。\n**严禁**在回复中出现任何JSON代码块。只需要用自然语言组织回复即可。";
+            // 卡片数据摘要注入回复上下文：让 LLM 能引用卡片内容（如某场次属于哪家影院/价格/时间），但不原样输出
+            String cardSummary = JSONUtil.toJsonStr(decision.getCardData());
+            if (cardSummary.length() > 1500) {
+                cardSummary = cardSummary.substring(0, 1500) + "…";
+            }
+            // 存最近卡片摘要到会话状态，供后续轮次引用（"第二个场次"、"这个场次是哪个影院"等指代消解）
+            try {
+                state.setLastSearchContext(cardSummary);
+                movieStateManager.saveState(conversationId, state);
+            } catch (Exception e) {
+                log.warn("保存卡片摘要到会话状态失败: conversationId={}", conversationId, e);
+            }
+            toolResultForPrompt = "已通过前端卡片展示。卡片数据摘要（供你引用卡片内容，不要原样输出）：\n" + cardSummary;
+            antiJsonRule = "\n\n## 重要规则\n工具执行结果已通过可视化卡片在前端展示，你**不要**重复/原样输出卡片中的原始数据（尤其不要输出JSON）。但你可以根据卡片摘要回答用户关于卡片内容的问题（例如某个场次属于哪家影院、价格、时间、余座等）。只需要用自然语言组织回复。";
         } else {
             toolResultForPrompt = hasTool ? toolResult : "无工具结果";
             antiJsonRule = "";
         }
+        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
         String prompt = (GraphResponseGenerator.RESPONSE_PROMPT + antiJsonRule)
+                .replace("{today}", today)
                 .replace("{intent}", intent != null ? intent : "chat")
                 .replace("{tool_result}", toolResultForPrompt)
                 .replace("{state}", stateContext)
@@ -553,6 +588,8 @@ public class AiServiceImpl implements AiService {
                 movieSystemPromptCache = "你是一个电影票智能助手";
             }
         }
-        return movieSystemPromptCache;
+        // 每次调用实时注入当天日期（不能把日期缓存死）
+        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
+        return movieSystemPromptCache.replace("{today}", today);
     }
 }

@@ -1,6 +1,5 @@
 package com.limou.agent.service.impl;
 
-
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
@@ -13,6 +12,8 @@ import com.limou.agent.model.dto.order.CreateOrderRequest;
 import com.limou.agent.model.dto.order.LockSeatRequest;
 import com.limou.agent.model.dto.order.PayOrderRequest;
 import com.limou.agent.model.entity.*;
+import com.limou.agent.model.enums.CancelReasonEnum;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.model.vo.OrderVO;
 import com.limou.agent.model.vo.PayOrderVO;
 import com.limou.agent.model.vo.SeatLockResult;
@@ -20,7 +21,11 @@ import com.limou.agent.model.vo.TicketVO;
 import com.limou.agent.service.*;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import com.limou.agent.mq.OrderStatusNotifier;
+import com.limou.agent.mq.OrderTimeoutConfig;
+import com.limou.agent.mq.OrderTimeoutMessage;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,6 +75,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Autowired
     private TicketService ticketService;
 
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+
+    @Autowired
+    private OrderStatusNotifier orderStatusNotifier;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean lockSeat(LockSeatRequest request, Long userId) {
@@ -98,7 +109,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void unlockSeat(Long scheduleId, List<Long> seatIds, Long userId) {
-        if (scheduleId == null || CollUtil.isEmpty(seatIds)) return;
+        if (scheduleId == null || CollUtil.isEmpty(seatIds))
+            return;
         log.info("用户 {} 释放场次 {} 座位: {}", userId, scheduleId, seatIds);
         seatLockService.releaseSeatsToAvailable(scheduleId, seatIds);
     }
@@ -125,8 +137,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 if (showTime.isBefore(LocalDateTime.now())) {
                     throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法购票");
                 }
-            } catch (BusinessException e) { throw e; }
-            catch (Exception ignored) { /* 解析失败跳过 */ }
+            } catch (BusinessException e) {
+                throw e;
+            } catch (Exception ignored) {
+                /* 解析失败跳过 */ }
         }
 
         // 2. 锁座（幂等：已锁定的座位只续 Redis 锁，available 的走乐观锁）
@@ -179,6 +193,25 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     .build();
             this.save(order);
 
+            // ★ 发送延时消息到 RabbitMQ：15 分钟后检查是否已支付
+            try {
+                OrderTimeoutMessage msg = OrderTimeoutMessage.builder()
+                        .orderId(order.getId())
+                        .orderNo(orderNo)
+                        .userId(userId)
+                        .scheduleId(request.getScheduleId())
+                        .createdAt(System.currentTimeMillis())
+                        .build();
+                rabbitTemplate.convertAndSend(
+                        OrderTimeoutConfig.ORDER_TIMEOUT_EXCHANGE,
+                        OrderTimeoutConfig.ORDER_TIMEOUT_ROUTING_KEY,
+                        msg);
+                log.info("订单 {} 超时延时消息已发送", orderNo);
+            } catch (Exception e) {
+                log.error("发送订单超时延时消息失败: orderNo={}", orderNo, e);
+                // 消息发送失败不影响订单创建，兜底由定时任务处理
+            }
+
             // 7. 创建订单-座位关联
             List<OrderSeat> orderSeats = seats.stream().map(seat -> {
                 OrderSeat os = new OrderSeat();
@@ -218,7 +251,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
         }
-        if (!"pending".equals(order.getStatus())) {
+        if (!OrderStatusEnum.PENDING.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单状态不正确");
         }
 
@@ -245,12 +278,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
         }
-        if (!"pending".equals(order.getStatus())) {
+        if (!OrderStatusEnum.PENDING.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅待支付订单可模拟支付");
         }
 
         // 模拟支付：直接标记为已支付
-        order.setStatus("paid");
+        order.setStatus(OrderStatusEnum.PAID.getValue());
         order.setPaidAt(LocalDateTime.now());
         order.setAlipayTradeNo("MOCK_" + IdUtil.getSnowflakeNextIdStr());
         order.setAlipayStatus("TRADE_SUCCESS");
@@ -267,6 +300,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
 
         log.info("用户 {} 模拟支付成功，订单号: {}", userId, order.getOrderNo());
+
+        // 通过 SSE 推送通知前端
+        try {
+            orderStatusNotifier.notifyOrderPaid(userId, order.getId());
+        } catch (Exception ignored) {
+        }
 
         List<String> seatLabels = orderSeats.stream()
                 .map(OrderSeat::getSeatLabel)
@@ -358,13 +397,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             Schedule schedule = scheduleMap.get(order.getScheduleId());
             if (schedule != null) {
                 Film film = filmMap.get(schedule.getFilmId());
-                if (film != null) vo.setPosterUrl(film.getPosterUrl());
+                if (film != null)
+                    vo.setPosterUrl(film.getPosterUrl());
             }
             // 每张票（含核销状态），前端据此隐藏/禁用退款入口
             vo.setTickets(ticketMap.getOrDefault(order.getId(), Collections.emptyList()));
             return vo;
         }).collect(Collectors.toList());
-
 
         voPage.setRecords(voList);
         return voPage;
@@ -375,7 +414,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     public int cancelTimeoutOrders() {
         // 查找超时未支付的订单（pending 且 expireAt < now）
         QueryWrapper qw = QueryWrapper.create()
-                .eq("status", "pending")
+                .eq("status", OrderStatusEnum.PENDING.getValue())
                 .le("expireAt", new Date());
         List<Order> timeoutOrders = this.list(qw);
 
@@ -387,8 +426,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         // 取消订单
         timeoutOrders.forEach(o -> {
-            o.setStatus("cancelled");
-            o.setCancelReason("timeout");
+            o.setStatus(OrderStatusEnum.CANCELLED.getValue());
+            o.setCancelReason(CancelReasonEnum.TIMEOUT.getValue());
         });
         this.updateBatch(timeoutOrders);
 
@@ -421,13 +460,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
         }
-        if (!"pending".equals(order.getStatus())) {
+        if (!OrderStatusEnum.PENDING.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "只有待支付订单可以取消");
         }
 
         // 取消订单
-        order.setStatus("cancelled");
-        order.setCancelReason("user_cancelled");
+        order.setStatus(OrderStatusEnum.CANCELLED.getValue());
+        order.setCancelReason(CancelReasonEnum.USER_CANCELLED.getValue());
         this.updateById(order);
 
         // 释放座位
@@ -455,10 +494,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (!order.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "无权操作此订单");
         }
-        if (!"paid".equals(order.getStatus())) {
+        if (!OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅已支付订单可退款");
         }
-        if ("refunded".equals(order.getStatus())) {
+        if (OrderStatusEnum.REFUNDED.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已退款，不可重复操作");
         }
         // 核销拦截：有任一票已核销使用 → 整单禁止退款
@@ -488,7 +527,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         // 时间维度拦截：已开场 / 开场前1分钟内
         try {
-            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]");
+//            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]");
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
             long diffSeconds = java.time.Duration.between(LocalDateTime.now(), showTime).getSeconds();
             if (diffSeconds <= 0) {
@@ -508,7 +548,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         String tradeNo = order.getAlipayTradeNo();
         if (tradeNo == null || tradeNo.startsWith("MOCK_")) {
-            order.setStatus("refunded");
+            order.setStatus(OrderStatusEnum.REFUNDED.getValue());
             order.setCancelReason("退票");
             order.setRefundAmount(refundAmount);
             order.setRefundTime(LocalDateTime.now());
@@ -518,7 +558,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             if (!refundSuccess) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
             }
-            order.setStatus("refunded");
+            order.setStatus(OrderStatusEnum.REFUNDED.getValue());
             order.setCancelReason("退票");
             order.setRefundAmount(refundAmount);
             order.setRefundTime(LocalDateTime.now());
@@ -541,9 +581,11 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Transactional(rollbackFor = Exception.class)
     public void deleteOrder(Long orderId, Long userId) {
         Order order = this.getById(orderId);
-        if (order == null) throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
-        if (!order.getUserId().equals(userId)) throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        if ("pending".equals(order.getStatus()) || "paid".equals(order.getStatus())) {
+        if (order == null)
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
+        if (!order.getUserId().equals(userId))
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        if (OrderStatusEnum.PENDING.getValue().equals(order.getStatus()) || OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅已退款、已取消或已过期的订单可删除");
         }
         this.removeById(orderId);
@@ -561,13 +603,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
         }
-        if ("cancelled".equals(order.getStatus())) {
+        if (OrderStatusEnum.CANCELLED.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已取消，无需重复操作");
         }
-        if ("refunded".equals(order.getStatus())) {
+        if (OrderStatusEnum.REFUNDED.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已退款，无需重复操作");
         }
-        if ("completed".equals(order.getStatus())) {
+        if (OrderStatusEnum.COMPLETED.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "已完成订单无法取消");
         }
         if ("expired".equals(order.getStatus())) {
@@ -575,7 +617,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
 
         // PRD 3.3.5 交互规则③：退款校验读取系统配置退款策略，超出可退款时限禁止退款
-        if ("paid".equals(order.getStatus())) {
+        if (OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
             int refundHours = getRefundTimeoutHours();
             LocalDateTime paidAt = order.getPaidAt();
             if (paidAt != null && paidAt.plusHours(refundHours).isBefore(LocalDateTime.now())) {
@@ -588,19 +630,19 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
         }
 
-        if ("paid".equals(order.getStatus())) {
+        if (OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
             String refundAmount = order.getTotalPrice().toString();
             boolean refundSuccess = alipayService.refund(order.getOrderNo(), refundAmount, order.getAlipayTradeNo());
             if (!refundSuccess) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR, "支付宝退款失败，请稍后重试");
             }
-            order.setStatus("refunded");
+            order.setStatus(OrderStatusEnum.REFUNDED.getValue());
             order.setRefundAmount(order.getTotalPrice());
             order.setRefundTime(LocalDateTime.now());
             // 未核销的票置为已退票
             ticketService.markRefunded(orderId);
         } else {
-            order.setStatus("cancelled");
+            order.setStatus(OrderStatusEnum.CANCELLED.getValue());
         }
 
         order.setCancelReason(reason);
@@ -715,20 +757,5 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
         }
         return vo;
-    }
-
-    @Override
-    public Long findCompletedOrderId(Long userId, Long filmId) {
-        List<Schedule> schedules = scheduleService.list(
-                QueryWrapper.create().eq("filmId", filmId));
-        if (CollUtil.isEmpty(schedules)) return null;
-        List<Long> scheduleIds = schedules.stream().map(Schedule::getId).collect(Collectors.toList());
-        QueryWrapper qw = QueryWrapper.create()
-                .eq("userId", userId)
-                .in("scheduleId", scheduleIds)
-                .in("status", List.of("paid", "completed"))
-                .orderBy("createTime", false);
-        Order order = this.getOne(qw);
-        return order != null ? order.getId() : null;
     }
 }
