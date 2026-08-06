@@ -117,7 +117,7 @@ public class GetSeatMapTool extends BaseTool {
                     Seat seat = seatMap.get(key);
                     if (seat != null) {
                         Map<String, Object> seatInfo = new HashMap<>();
-                        seatInfo.put("seatId", seat.getId());
+                        seatInfo.put("seatId", seat.getId().toString()); // 雪花 ID 字符串化，避免前端精度丢失
                         seatInfo.put("rowNum", seat.getRowNum());
                         seatInfo.put("colNum", seat.getColNum());
                         seatInfo.put("seatLabel", seat.getSeatLabel());

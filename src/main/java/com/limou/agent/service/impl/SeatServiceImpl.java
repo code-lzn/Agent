@@ -67,8 +67,14 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements Se
         vo.setHallId(hall.getId());
         vo.setHallName(hall.getName());
         vo.setHallType(hall.getHallType());
-        vo.setRowCount(hall.getRowCount());
-        vo.setColCount(hall.getColCount());
+        // rowCount/colCount 优先用影厅布局；若场次实际座位超出（旧场次座位未随影厅布局重建），
+        // 按实际座位推断，保证 H5 按物理格遍历时全部座位可见、不错位
+        int layoutRows = hall.getRowCount() != null ? hall.getRowCount() : 0;
+        int layoutCols = hall.getColCount() != null ? hall.getColCount() : 0;
+        int maxRow = seats.stream().mapToInt(Seat::getRowNum).max().orElse(0);
+        int maxCol = seats.stream().mapToInt(Seat::getColNum).max().orElse(0);
+        vo.setRowCount(Math.max(layoutRows, maxRow));
+        vo.setColCount(Math.max(layoutCols, maxCol));
         vo.setSeats(seats);
         // 布局信息（从影厅 seatTemplate 带出，前端按物理格遍历渲染）
         if (cn.hutool.core.util.StrUtil.isNotBlank(hall.getSeatTemplate())) {

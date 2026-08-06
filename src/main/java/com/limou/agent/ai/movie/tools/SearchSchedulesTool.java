@@ -206,12 +206,12 @@ public class SearchSchedulesTool extends BaseTool {
                 );
 
                 Map<String, Object> map = new HashMap<>();
-                map.put("scheduleId", s.getId());
-                map.put("filmId", s.getFilmId());
-                map.put("cinemaId", s.getCinemaId());
+                map.put("scheduleId", s.getId().toString()); // 雪花 ID 用字符串，避免前端精度丢失
+                map.put("filmId", String.valueOf(s.getFilmId()));
+                map.put("cinemaId", String.valueOf(s.getCinemaId()));
                 Cinema cinema = cinemaMap.get(s.getCinemaId());
                 map.put("cinemaName", cinema != null ? cinema.getName() : null);
-                map.put("hallId", s.getHallId());
+                map.put("hallId", String.valueOf(s.getHallId()));
                 map.put("hallName", hall.getName());
                 map.put("hallType", hall.getHallType());
                 map.put("showDate", s.getShowDate() != null ? s.getShowDate().toString() : null);

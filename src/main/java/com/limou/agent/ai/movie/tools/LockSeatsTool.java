@@ -218,7 +218,7 @@ public class LockSeatsTool extends BaseTool {
                 Map<String, Object> result = new HashMap<>();
                 result.put("success", true);
                 result.put("lockedSeats", lockedLabels);
-                result.put("lockedSeatIds", availableSeats.stream().map(Seat::getId).collect(Collectors.toList()));
+                result.put("lockedSeatIds", availableSeats.stream().map(Seat::getId).map(String::valueOf).collect(Collectors.toList()));
                 result.put("count", lockedLabels.size());
                 result.put("totalPrice", totalPrice);
                 result.put("message", "太棒了！🎉 已为您锁定 " + String.join("、", lockedLabels));
