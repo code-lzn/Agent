@@ -4,7 +4,6 @@ import com.mybatisflex.annotation.Column;
 import com.mybatisflex.annotation.Id;
 import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
-import com.mybatisflex.core.keygen.KeyGenerators;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,7 +23,7 @@ public class UserWatchedFilm implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    @Id(keyType = KeyType.Generator, value = KeyGenerators.snowFlakeId)
+    @Id(keyType = KeyType.Auto)
     private Long id;
 
     @Column("userId")
@@ -38,7 +37,4 @@ public class UserWatchedFilm implements Serializable {
 
     @Column("createTime")
     private LocalDateTime createTime;
-
-    @Column("updateTime")
-    private LocalDateTime updateTime;
 }
