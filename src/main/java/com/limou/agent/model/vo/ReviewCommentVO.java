@@ -11,25 +11,18 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class FilmReviewVO {
+public class ReviewCommentVO {
 
     private Long id;
+    private Long reviewId;
     private Long userId;
-    private Long filmId;
-    private Long orderId;
-    private Integer rating;
+    private Long parentId;
     private String content;
-    private String tags;
     private Integer helpfulCount;
-    private Integer commentCount;
     private LocalDateTime createTime;
 
     private String userName;
     private String userAvatar;
-
-    /** 是否购票用户 */
-    private Boolean isPurchased;
-
-    /** 当前用户是否已点有用 */
+    private String replyToUserName;
     private Boolean isHelpful;
 }
