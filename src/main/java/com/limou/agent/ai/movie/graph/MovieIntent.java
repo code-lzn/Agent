@@ -17,6 +17,7 @@ public enum MovieIntent {
     // ===== 工具意图（需要调用具体工具） =====
     SEARCH_MOVIE("search_movie", "搜索影片"),
     SEARCH_CINEMA("search_cinema", "搜索影院"),
+    SEARCH_NEARBY("search_nearby", "搜索附近影院"),
     SEARCH_SCHEDULE("search_schedule", "搜索场次"),
     GET_SEAT_MAP("get_seat_map", "获取座位图"),
     LOCK_SEATS("lock_seats", "锁定座位"),

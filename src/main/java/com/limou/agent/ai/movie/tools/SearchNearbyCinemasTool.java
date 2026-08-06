@@ -184,6 +184,14 @@ public class SearchNearbyCinemasTool extends BaseTool {
             List<AmapPoi> result = new ArrayList<>();
             for (int i = 0; i < pois.size(); i++) {
                 JSONObject poi = pois.getJSONObject(i);
+
+                // ★ 类型校验：只保留影院相关 POI（typecode 以 06 开头 = 娱乐休闲大类）
+                String typecode = poi.getStr("typecode", "");
+                if (!isCinemaType(typecode)) {
+                    log.debug("Amap POI 非影院类型，跳过: name={}, typecode={}", poi.getStr("name"), typecode);
+                    continue;
+                }
+
                 String[] loc = poi.getStr("location", "").split(",");
                 double pLng = loc.length == 2 ? Double.parseDouble(loc[0]) : 0;
                 double pLat = loc.length == 2 ? Double.parseDouble(loc[1]) : 0;
@@ -249,6 +257,7 @@ public class SearchNearbyCinemasTool extends BaseTool {
                 matchedDbIds.add(matched.getId());
                 map.put("matched", true);
                 map.put("cinemaId", matched.getId());
+                map.put("name", matched.getName());           // ★ 前端兼容字段
                 map.put("cinemaName", matched.getName());
                 map.put("dbAddress", matched.getAddress());
                 map.put("tags", matched.getTags());
@@ -258,6 +267,7 @@ public class SearchNearbyCinemasTool extends BaseTool {
             } else {
                 map.put("matched", false);
                 map.put("cinemaId", null);
+                map.put("name", poi.name);                    // ★ 未匹配时用 Amap 名称
                 map.put("hasSchedule", false);
             }
 
@@ -274,6 +284,7 @@ public class SearchNearbyCinemasTool extends BaseTool {
 
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("amapName", cinema.getName());
+            map.put("name", cinema.getName());               // ★ 前端兼容字段
             map.put("address", cinema.getAddress());
             map.put("city", cinema.getCity());
             map.put("matched", true);
@@ -282,7 +293,20 @@ public class SearchNearbyCinemasTool extends BaseTool {
             map.put("dbAddress", cinema.getAddress());
             map.put("tags", cinema.getTags());
             map.put("basePrice", cinema.getBasePrice());
-            map.put("distanceText", "未知");
+
+            // ★ 利用 DB 中影院的经纬度计算距离
+            if (cinema.getLongitude() != null && cinema.getLatitude() != null) {
+                double cLng = cinema.getLongitude().doubleValue();
+                double cLat = cinema.getLatitude().doubleValue();
+                int distMeters = haversineDistance(centerLat, centerLng, cLat, cLng);
+                map.put("lng", cLng);
+                map.put("lat", cLat);
+                map.put("distanceMeters", distMeters);
+                map.put("distanceText", formatDistance(distMeters));
+            } else {
+                map.put("distanceText", "未知");
+            }
+
             boolean hasSchedule = filmId == null || scheduledCinemaIds.contains(cinema.getId());
             map.put("hasSchedule", hasSchedule);
             result.add(map);
@@ -312,11 +336,12 @@ public class SearchNearbyCinemasTool extends BaseTool {
     }
 
     /**
-     * 名称匹配得分
+     * 名称匹配得分（优化中文名称匹配）
      * - 完全匹配 → 100
-     * - DB名包含POI名 或 POI名包含DB名 → 50
-     * - 去除常见后缀（影城/影院/电影院）后匹配 → 80
-     * - 关键词交集 ≥ 1 → 关键词数
+     * - 包含关系 → 50
+     * - 去除常见后缀后包含/相等 → 80
+     * - 中文 bigram 交集得分 → bigram 命中数
+     * - 关键词交集 → 关键词数
      */
     private int nameMatchScore(String amapName, String dbName) {
         if (amapName == null || dbName == null) return 0;
@@ -327,19 +352,57 @@ public class SearchNearbyCinemasTool extends BaseTool {
         if (a.equals(d)) return 100;
         if (a.contains(d) || d.contains(a)) return 50;
 
-        // 去除后缀后匹配
-        String aClean = a.replaceAll("[（(]?影城|电影院|影院|影剧院|[）)]", "");
-        String dClean = d.replaceAll("[（(]?影城|电影院|影院|影剧院|[）)]", "");
+        // 去除常见后缀和修饰后匹配
+        // ★ 更激进的清洗：品牌名后面的分店标注 (XX路/XX店/XX广场/XX号)、影院后缀、括号内容
+        String suffixPattern = "[（(]?影城|电影院|影院|影剧院|[）)]"
+                + "|[（(][^）)]*[）)]"        // 括号及内容
+                + "|[\\u4e00-\\u9fa5]{1,4}店"   // XX店
+                + "|[\\u4e00-\\u9fa5]{0,4}[路街]\\d{0,4}号?" // XX路/XX街
+                + "|[\\u4e00-\\u9fa5]{0,6}广场"   // XX广场
+                + "|\\d+号";                       // XX号
+        String aClean = a.replaceAll(suffixPattern, "").trim();
+        String dClean = d.replaceAll(suffixPattern, "").trim();
+
+        // 清洗后完全匹配或包含
         if (aClean.equals(dClean) || (aClean.length() > 1 && dClean.length() > 1
                 && (aClean.contains(dClean) || dClean.contains(aClean)))) {
             return 80;
         }
 
-        // 关键词匹配
+        // ★ 中文 bigram 交集（解决分词失败的问题）
+        if (aClean.length() >= 2 && dClean.length() >= 2) {
+            Set<String> aBi = charNgrams(aClean, 2);
+            Set<String> dBi = charNgrams(dClean, 2);
+            Set<String> intersection = new HashSet<>(aBi);
+            intersection.retainAll(dBi);
+            int biHits = intersection.size();
+            int minLen = Math.min(aClean.length(), dClean.length());
+            // bigram 命中率高 → 很可能是同一家
+            if (biHits >= 3 && biHits >= minLen * 0.4) return 60;
+            if (biHits >= 2) return biHits * 10; // 2个匹配→20, 3个→30...
+        }
+
+        // 关键词匹配（空格/特殊符号分词，对英文名有效）
         Set<String> aWords = new HashSet<>(Arrays.asList(aClean.split("[\\s·\\-—]+")));
         Set<String> dWords = new HashSet<>(Arrays.asList(dClean.split("[\\s·\\-—]+")));
         aWords.retainAll(dWords);
         return aWords.size();
+    }
+
+    /** 判断 Amap POI 类型码是否为影院 */
+    private static boolean isCinemaType(String typecode) {
+        if (typecode == null || typecode.isBlank()) return false;
+        // 060400=电影院, 060410=影剧院 — 都属于影院相关类型
+        return typecode.startsWith("0604");
+    }
+
+    /** 生成中文 n-gram */
+    private Set<String> charNgrams(String s, int n) {
+        Set<String> set = new HashSet<>();
+        for (int i = 0; i <= s.length() - n; i++) {
+            set.add(s.substring(i, i + n));
+        }
+        return set;
     }
 
     // ==================== 写回 State ====================
@@ -374,6 +437,18 @@ public class SearchNearbyCinemasTool extends BaseTool {
     private String formatDistance(int meters) {
         if (meters < 1000) return meters + "m";
         return String.format("%.1fkm", meters / 1000.0);
+    }
+
+    /** Haversine 公式计算两点间距离（米） */
+    private static int haversineDistance(double lat1, double lng1, double lat2, double lng2) {
+        final double R = 6371000; // 地球半径（米）
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return (int) Math.round(R * c);
     }
 
     /** Amap POI 数据对象 */

@@ -35,6 +35,11 @@ public class SmartMovieRouter {
     private static final Pattern CANCEL_PATTERN = Pattern.compile("(算了|不买了|取消|不要了|放弃|改天|下次)");
     private static final Pattern NEARBY_CINEMA_PATTERN = Pattern.compile(
             "(附近|周边|本地|离我近).{0,8}(影院|影城)|(影院|影城).{0,8}(附近|周边|有哪些)");
+    /** ★ 纯地理位置名 — 用户没说影院品牌，而是说了一个地点/地标名，应走附近搜索 */
+    private static final Pattern LOCATION_NAME_PATTERN = Pattern.compile(
+            "(大学|学院|学校|校区|广场|商场|购物中心|百货|火车站|高铁站|机场|地铁站|汽车站|公交站"
+                    + "|小区|社区|花园|公寓|写字楼|大厦|中心|医院|体育馆|图书馆|公园|景区|乐园|古城|古镇"
+                    + "|街|路|大道|商圈|步行街|小吃街|美食街|万达广场|大悦城|万象城|银泰|来福士|吾悦)");
     private static final Pattern MOVIE_DISCOVERY_PATTERN = Pattern.compile(
             "(推荐|最近|现在|当前).{0,8}(电影|影片|热映|新片)|(热映|新片).{0,8}(哪些|推荐|电影)");
 
@@ -74,6 +79,17 @@ public class SmartMovieRouter {
         if (matches(NEARBY_CINEMA_PATTERN, message)) {
             log.info("Router: 规则命中 附近影院 → REACT（使用 Amap 地理搜索）");
             return SmartRouteResult.react();
+        }
+
+        // ★ 纯地理位置名（大学/广场/火车站等），不含影院品牌 → search_nearby
+        if (matches(LOCATION_NAME_PATTERN, message) && !matches(CINEMA_HINT, message)) {
+            log.info("Router: 规则命中 地理位置名 → GRAPH (search_nearby)");
+            ConversationState locSlots = new ConversationState();
+            locSlots.setCinemaName(message.trim());  // 作为地理位置描述传入
+            return SmartRouteResult.graph(GraphIntentResult.builder()
+                    .intent("search_nearby")
+                    .slots(locSlots)
+                    .build());
         }
 
         if (matches(MOVIE_DISCOVERY_PATTERN, message)) {
