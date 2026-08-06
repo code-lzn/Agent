@@ -275,3 +275,27 @@ CREATE TABLE film_review (
                              KEY idx_userId (userId),
                              UNIQUE KEY uk_user_film (userId, filmId)
 );
+
+-- 影评有用记录表
+CREATE TABLE `review_helpful` (
+                                  `id`       bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                  `userId`   bigint NOT NULL COMMENT '用户ID',
+                                  `reviewId` bigint NOT NULL COMMENT '影评ID',
+                                  `isDelete` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除 0-未删 1-已删',
+                                  `createTime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  PRIMARY KEY (`id`),
+                                  INDEX `idx_user_review` (`userId`, `reviewId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影评有用记录';
+
+-- 影评评论表
+CREATE TABLE `review_comment` (
+                                  `id`       bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                  `reviewId` bigint NOT NULL COMMENT '影评ID',
+                                  `userId`   bigint NOT NULL COMMENT '评论用户ID',
+                                  `parentId` bigint DEFAULT NULL COMMENT '父评论ID，NULL表示直接评论影评',
+                                  `content`  varchar(500) NOT NULL COMMENT '评论内容',
+                                  `isDelete` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除 0-未删 1-已删',
+                                  `createTime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  PRIMARY KEY (`id`),
+                                  INDEX `idx_review` (`reviewId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影评评论';

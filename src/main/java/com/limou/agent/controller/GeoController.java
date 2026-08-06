@@ -29,7 +29,7 @@ import java.util.Map;
 @Slf4j
 public class GeoController {
 
-    @Value("${amap.web-service-key}")
+    @Value("${amap.api-key}")
     private String amapWebServiceKey;
 
     /**
