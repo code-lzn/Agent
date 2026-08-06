@@ -104,6 +104,14 @@ public class SmartMovieRouter {
             return SmartRouteResult.graph(null);
         }
 
+        // ★ 明确购票意图（订/买/购/下单/选座…票座）+ 已有影片 → 走 Graph 的确定性锁座下单链路
+        //   （Graph 内 LockSeatsNode 自动解析场次 → 自动选座 → 锁座 → 条件边 create_order，一次完成；
+        //     避免 ReAct 下 LLM 工具调用不稳定——只锁座停下/重复下单）
+        if (matches(BOOKING_KEYWORD, message) && state != null && state.getFilmId() != null) {
+            log.info("Router: 购票意图 + 已有影片 → GRAPH (确定性锁座下单)");
+            return SmartRouteResult.graph(null);
+        }
+
         // 影片名 + 影院 + 座位诉求 → ReAct（如"想看志愿3在万达，给我座位表"）
         if (matches(MOVIE_NAME_HINT, message)
                 && matches(CINEMA_HINT, message)

@@ -9,9 +9,11 @@ import com.limou.agent.ai.movie.graph.MovieGraphState;
 import com.limou.agent.ai.movie.graph.MovieIntent;
 import com.limou.agent.ai.movie.tools.GetSeatMapTool;
 import com.limou.agent.ai.movie.tools.LockSeatsTool;
+import com.limou.agent.ai.movie.tools.SearchSchedulesTool;
 import com.limou.agent.model.dto.movie.ConversationState;
 import lombok.extern.slf4j.Slf4j;
 
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -32,11 +34,14 @@ public class LockSeatsNode implements GraphNode<MovieGraphState> {
 
     private final LockSeatsTool tool;
     private final GetSeatMapTool getSeatMapTool;
+    private final SearchSchedulesTool searchSchedulesTool;
     private final MovieStateManager stateManager;
 
-    public LockSeatsNode(LockSeatsTool tool, GetSeatMapTool getSeatMapTool, MovieStateManager stateManager) {
+    public LockSeatsNode(LockSeatsTool tool, GetSeatMapTool getSeatMapTool,
+                         SearchSchedulesTool searchSchedulesTool, MovieStateManager stateManager) {
         this.tool = tool;
         this.getSeatMapTool = getSeatMapTool;
+        this.searchSchedulesTool = searchSchedulesTool;
         this.stateManager = stateManager;
     }
 
@@ -49,9 +54,19 @@ public class LockSeatsNode implements GraphNode<MovieGraphState> {
         ConversationState convState = state.getConvState();
 
         if (convState.getScheduleId() == null) {
-            state.setToolResult("{\"error\":\"请先选择场次\"}");
-            state.setToolName(MovieIntent.LOCK_SEATS.getCode());
-            return state;
+            // ★ 自动解析场次：用户文字指定场次（"去XX影院选14:39场次"）时 scheduleId 可能尚未写回，
+            //   用已收集的影片/影院/日期/时间/厅信息查场次并匹配唯一场次，打通"一句话下单"链路
+            Long resolvedScheduleId = resolveScheduleId(convState);
+            if (resolvedScheduleId != null) {
+                convState.setScheduleId(resolvedScheduleId);
+                stateManager.saveState(state.getConversationId(), convState);
+                log.info("LockSeats 自动解析场次 scheduleId={}: conversationId={}",
+                        resolvedScheduleId, state.getConversationId());
+            } else {
+                state.setToolResult("{\"error\":\"请先选择场次\"}");
+                state.setToolName(MovieIntent.LOCK_SEATS.getCode());
+                return state;
+            }
         }
 
         List<Long> seatIds = convState.getSeatIds();
@@ -105,6 +120,59 @@ public class LockSeatsNode implements GraphNode<MovieGraphState> {
         }
 
         return state;
+    }
+
+    /** 场次未解析时，用已收集的影片/影院/日期/时间/厅信息查场次并匹配唯一场次（优先按开始时间精确匹配） */
+    private Long resolveScheduleId(ConversationState convState) {
+        try {
+            if (convState.getFilmId() == null) return null;
+            String result = searchSchedulesTool.searchSchedules(
+                    convState.getFilmId(),
+                    convState.getCinemaId(),
+                    convState.getShowDate(),
+                    convState.getHallType(),
+                    convState.getStartTime(),
+                    convState.getHallName());
+            JSONObject obj = JSONUtil.parseObj(result);
+            JSONArray sessions = obj.getJSONArray("sessions");
+            if (sessions == null || sessions.isEmpty()) return null;
+
+            String requestedTime = convState.getStartTime();
+            if (requestedTime != null && !requestedTime.isBlank()) {
+                for (int i = 0; i < sessions.size(); i++) {
+                    JSONObject s = sessions.getJSONObject(i);
+                    if (sameTime(requestedTime, s.getStr("startTime"))) {
+                        return s.getLong("scheduleId");
+                    }
+                }
+            }
+            // 影院名匹配唯一场次（多个匹配则不确定，返回 null 不自动选）
+            JSONObject matched = null;
+            String cinemaName = convState.getCinemaName();
+            if (has(cinemaName)) {
+                for (int i = 0; i < sessions.size(); i++) {
+                    JSONObject s = sessions.getJSONObject(i);
+                    String cn = s.getStr("cinemaName");
+                    if (cn != null && cn.contains(cinemaName)) {
+                        if (matched != null) return null;
+                        matched = s;
+                    }
+                }
+                if (matched != null) return matched.getLong("scheduleId");
+            }
+        } catch (Exception e) {
+            log.warn("LockSeats 自动解析场次失败: conversationId={}", e);
+        }
+        return null;
+    }
+
+    private boolean sameTime(String a, String b) {
+        if (a == null || b == null) return false;
+        try {
+            return LocalTime.parse(a.trim()).equals(LocalTime.parse(b.trim()));
+        } catch (Exception ignored) {
+            return a.trim().equals(b.trim());
+        }
     }
 
     /**

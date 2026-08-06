@@ -93,7 +93,7 @@ public class MovieGraphWorkflow {
                 .addNode("search_nearby",   new SearchNearbyNode(searchNearbyCinemasTool, movieStateManager))
                 .addNode("search_schedule", new SearchScheduleNode(searchSchedulesTool, movieStateManager))
                 .addNode("get_seat_map",    new GetSeatMapNode(getSeatMapTool))
-                .addNode("lock_seats",      new LockSeatsNode(lockSeatsTool, getSeatMapTool, movieStateManager))
+                .addNode("lock_seats",      new LockSeatsNode(lockSeatsTool, getSeatMapTool, searchSchedulesTool, movieStateManager))
                 .addNode("create_order",    new CreateOrderNode(createOrderTool, movieStateManager))
                 .addNode("pay_order",       new PayOrderNode(payOrderTool))
 

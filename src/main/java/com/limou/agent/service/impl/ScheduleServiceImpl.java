@@ -397,11 +397,11 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         Set<Long> filmIds = schedules.stream()
                 .map(Schedule::getFilmId)
                 .collect(Collectors.toSet());
-        // 2. 查 hot 影片
+        // 2. 查可上映影片：热映 hot + 正在上映 published 都返回（published 影片有排片也能被展示）
         return filmMapper.selectListByQuery(
                 QueryWrapper.create()
                         .in("id", filmIds)
-                        .eq("status", "hot")
+                        .in("status", List.of("hot", "published"))
         );
     }
 

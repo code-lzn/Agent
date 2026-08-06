@@ -183,15 +183,12 @@ public class SearchSchedulesTool extends BaseTool {
                     }
                 }
 
-                // ★ 时间范围过滤 —— 只保留目标时间前后3小时内的场次
+                // ★ 时间距离计算 —— 不再硬过滤（"下午→14:00"±3小时窗口会漏掉合理场次），仅用于排序
                 long timeDiffMinutes = 0;
                 if (targetTime != null && s.getStartTime() != null) {
                     try {
                         LocalTime scheduleTime = LocalTime.parse(s.getStartTime());
                         timeDiffMinutes = Math.abs(ChronoUnit.MINUTES.between(targetTime, scheduleTime));
-                        if (timeDiffMinutes > 180) { // 超过3小时 → 跳过
-                            continue;
-                        }
                     } catch (Exception ignored) {}
                 }
 

@@ -46,6 +46,11 @@ public class GraphIntentClassifier {
             - chat: 一般对话
             - unknown: 无法识别
 
+            ## 意图判断要点（重要）
+            - 用户只说影院/地点/场次/日期（如"去洛阳耀莱""看看CGV的场次""明天下午的"）→ **search_cinema / search_schedule**，**不要**推断为购票动作
+            - 只有明确出现购票词（"买""订""下单""选X个座""要X张票""帮我选座位"）才识别为 **lock_seats / create_order**
+            - 用户重新指定影院或场次（"去XX影院""换XX场次"）视为新一轮查询，不延续之前的订单
+
             ## 槽位提取规则
             从用户输入中提取以下字段，有则填，无则 null：
             - filmName: 影片名称

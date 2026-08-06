@@ -219,6 +219,10 @@ public class MovieStateManager {
         if (searchPhaseChanged) {
             state.setScheduleId(null);
             state.setHallName(null);
+            // 换影院/换片/换日期时，本轮未指定厅型则清除残留 hallType（旧厅型会把新影院的场次全部过滤掉）
+            if (newSlots.getHallType() == null) {
+                state.setHallType(null);
+            }
             state.setSeatIds(null);
             state.setSeatLabels(null);
             state.setOrderId(null);

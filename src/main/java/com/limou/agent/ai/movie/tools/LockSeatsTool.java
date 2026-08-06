@@ -230,6 +230,7 @@ public class LockSeatsTool extends BaseTool {
                         List<Long> lockedIds = availableSeats.stream().map(Seat::getId).collect(Collectors.toList());
                         ConversationState convState = stateManager.getState(convId);
                         convState.setSeatIds(lockedIds);
+                        convState.setScheduleId(scheduleId);
                         stateManager.saveState(convId, convState);
                         log.info("lockSeats 写回 seatIds={} 到 Redis: conversationId={}", lockedIds, convId);
                     } catch (Exception e) {
