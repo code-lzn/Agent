@@ -13,6 +13,7 @@ import com.limou.agent.model.vo.TicketVO;
 import com.limou.agent.service.OrderService;
 import com.limou.agent.service.ScheduleService;
 import com.limou.agent.service.TicketService;
+import com.limou.agent.service.UserWatchedFilmService;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +51,9 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
     @Autowired
     @Lazy
     private OrderService orderService;
+
+    @Autowired
+    private UserWatchedFilmService userWatchedFilmService;
 
     /** 生成 8 位数字取票码（前导 0 补位） */
     private String generateTicketCode() {
@@ -151,6 +155,23 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
         }
         log.info("管理员 {} 核销票 {}（订单 {} 座位 {}）", operatorId, ticket.getTicketCode(),
                 ticket.getOrderId(), ticket.getSeatLabel());
+
+        // 核销后检查订单下所有票是否都已核销 → 标记已完成
+        List<Ticket> allTickets = listByOrder(ticket.getOrderId());
+        boolean allChecked = allTickets.stream().allMatch(t ->
+                t.getStatus() != null && TicketStatusEnum.CHECKED == TicketStatusEnum.getEnumByValue(t.getStatus()));
+        if (allChecked) {
+            order.setStatus("completed");
+            orderService.updateById(order);
+            log.info("订单 {} 所有票已核销，状态变更为 completed", order.getId());
+
+            Schedule schedule = scheduleService.getById(ticket.getScheduleId());
+            if (schedule != null && schedule.getFilmId() != null) {
+                userWatchedFilmService.markAsWatched(order.getUserId(), schedule.getFilmId());
+                log.info("核销完成自动标记看过: userId={}, filmId={}", order.getUserId(), schedule.getFilmId());
+            }
+        }
+
         return buildTicketVO(ticket);
     }
 

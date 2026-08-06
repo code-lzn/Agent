@@ -463,18 +463,38 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         // 核销拦截：有任一票已核销使用 → 整单禁止退款
         if (ticketService.hasUsedTicket(orderId)) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "有票已核销使用，无法退款");
-        }
-        if ("expired".equals(order.getStatus())) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法退票");
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "已核销，无法退票");
         }
 
-        // 开场前1分钟内不可退票
+        // 已过期拦截：状态为 expired 或放映已结束
+        if ("expired".equals(order.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已过期，无法退票");
+        }
         try {
-            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+            Schedule schedule = scheduleService.getById(order.getScheduleId());
+            if (schedule != null && schedule.getEndTime() != null && schedule.getShowDate() != null) {
+                LocalDateTime endTime = LocalDateTime.of(
+                    schedule.getShowDate().toLocalDate(),
+                    java.time.LocalTime.parse(schedule.getEndTime()));
+                if (LocalDateTime.now().isAfter(endTime)) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已过期，无法退票");
+                }
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("检查放映结束时间失败: orderId={}", orderId, e);
+        }
+
+        // 时间维度拦截：已开场 / 开场前1分钟内
+        try {
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
-            long diffMinutes = java.time.Duration.between(LocalDateTime.now(), showTime).toMinutes();
-            if (diffMinutes < 1) {
+            long diffSeconds = java.time.Duration.between(LocalDateTime.now(), showTime).getSeconds();
+            if (diffSeconds <= 0) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法退票");
+            }
+            if (diffSeconds < 60) {
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "开场前1分钟内不支持退票");
             }
         } catch (BusinessException e) {
