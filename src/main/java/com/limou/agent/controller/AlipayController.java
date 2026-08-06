@@ -1,7 +1,9 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.mq.OrderStatusNotifier;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.OrderSeat;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.model.entity.Seat;
 import com.limou.agent.service.AlipayService;
 import com.limou.agent.service.OrderSeatService;
@@ -49,6 +51,9 @@ public class AlipayController {
     @Autowired
     private SeatLockService seatLockService;
 
+    @Autowired
+    private OrderStatusNotifier orderStatusNotifier;
+
     /**
      * 浏览器直接打开即可跳转支付宝沙箱收银台。
      * 用法：http://localhost:8123/api/payment/alipay/pay?orderId=xxx
@@ -57,7 +62,7 @@ public class AlipayController {
     @GetMapping(value = "/pay", produces = "text/html;charset=UTF-8")
     public String payPage(@RequestParam Long orderId) {
         Order order = orderService.getById(orderId);
-        if (order == null || !"pending".equals(order.getStatus())) {
+        if (order == null || !OrderStatusEnum.PENDING.getValue().equals(order.getStatus())) {
             return "<h1>订单不存在或状态异常</h1>";
         }
         String subject = order.getFilmName() + " - 电影票";
@@ -73,8 +78,8 @@ public class AlipayController {
     @GetMapping("/return")
     @Transactional(rollbackFor = Exception.class)
     public String returnPage(@RequestParam String out_trade_no,
-                             @RequestParam(required = false) String trade_no,
-                             @RequestParam(required = false) String total_amount) {
+            @RequestParam(required = false) String trade_no,
+            @RequestParam(required = false) String total_amount) {
         try {
             QueryWrapper qw = QueryWrapper.create().eq("orderNo", out_trade_no);
             Order order = orderService.getOne(qw);
@@ -83,7 +88,7 @@ public class AlipayController {
             }
 
             // 异步通知可能已经处理过了，避免重复
-            if (!"paid".equals(order.getStatus())) {
+            if (!OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
                 handlePaymentSuccess(order, trade_no);
             }
 
@@ -131,7 +136,7 @@ public class AlipayController {
                     return "failure";
                 }
 
-                if ("paid".equals(order.getStatus())) {
+                if (OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
                     log.info("订单已支付，忽略重复通知: {}", outTradeNo);
                     return "success";
                 }
@@ -151,7 +156,7 @@ public class AlipayController {
      * 支付成功通用处理：更新订单状态 + 座位标记已售 + 清理 Redis 锁。
      */
     private void handlePaymentSuccess(Order order, String tradeNo) {
-        order.setStatus("paid");
+        order.setStatus(OrderStatusEnum.PAID.getValue());
         order.setPaidAt(LocalDateTime.now());
         order.setAlipayTradeNo(tradeNo);
         order.setAlipayStatus("TRADE_SUCCESS");
@@ -169,5 +174,9 @@ public class AlipayController {
             // 清理 Redis 锁集合
             seatLockService.releaseSeats(order.getScheduleId(), seatIds);
         }
+
+        // 通过 SSE 推送通知前端
+        orderStatusNotifier.notifyOrderPaid(order.getUserId(), order.getId());
+        log.info("订单 {} 支付成功 SSE 已推送", order.getId());
     }
 }

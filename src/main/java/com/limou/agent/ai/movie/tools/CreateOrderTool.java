@@ -8,6 +8,7 @@ import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.*;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.*;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -129,7 +130,7 @@ public class CreateOrderTool extends BaseTool {
                     .hallName(hall != null ? hall.getName() : "")
                     .totalPrice(totalPrice)
                     .count(seatIds.size())
-                    .status("pending")
+                    .status(OrderStatusEnum.PENDING.getValue())
                     .expireAt(expireAt)
                     .isDelete(false)
                     .build();

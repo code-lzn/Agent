@@ -8,6 +8,7 @@ import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.Schedule;
 import com.limou.agent.model.entity.Seat;
 import com.limou.agent.model.entity.Ticket;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.model.enums.TicketStatusEnum;
 import com.limou.agent.model.vo.TicketVO;
 import com.limou.agent.service.OrderService;
@@ -137,7 +138,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
         if (order == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "订单不存在");
         }
-        if (!"paid".equals(order.getStatus())) {
+        if (!OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单未支付或已取消/退款，无法核销");
         }
 

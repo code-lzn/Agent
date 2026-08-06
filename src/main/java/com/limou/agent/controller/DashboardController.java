@@ -3,6 +3,7 @@ package com.limou.agent.controller;
 import com.limou.agent.common.BaseResponse;
 import com.limou.agent.common.ResultUtils;
 import com.limou.agent.model.entity.Order;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.service.*;
 import com.mybatisflex.core.query.QueryWrapper;
 import lombok.Data;
@@ -54,7 +55,7 @@ public class DashboardController {
 
         // 今日收入
         QueryWrapper paidQw = QueryWrapper.create()
-                .eq("status", "paid")
+                .eq("status", OrderStatusEnum.PAID.getValue())
                 .ge("createTime", todayStart)
                 .le("createTime", todayEnd);
         vo.setTodayRevenue(orderService.list(paidQw).stream()

@@ -4,6 +4,8 @@ import com.limou.agent.mapper.OrderMapper;
 import com.limou.agent.mapper.OrderSeatMapper;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.OrderSeat;
+import com.limou.agent.model.enums.CancelReasonEnum;
+import com.limou.agent.model.enums.OrderStatusEnum;
 
 import com.limou.agent.service.SeatLockService;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -46,7 +48,7 @@ public class OrderTimeoutScheduler {
             // 1. 查询所有 pending 状态且已过期的订单
             List<Order> expiredOrders = orderMapper.selectListByQuery(
                     QueryWrapper.create()
-                            .eq(Order::getStatus, "pending")
+                            .eq(Order::getStatus, OrderStatusEnum.PENDING.getValue())
                             .lt(Order::getExpireAt, LocalDateTime.now())
             );
 
@@ -93,8 +95,8 @@ public class OrderTimeoutScheduler {
         // 4. 更新订单状态为已取消
         orderMapper.update(Order.builder()
                 .id(orderId)
-                .status("cancelled")
-                .cancelReason("timeout")
+                .status(OrderStatusEnum.CANCELLED.getValue())
+                .cancelReason(CancelReasonEnum.TIMEOUT.getValue())
                 .build());
 
         log.info("订单已超时取消: orderId={}, orderNo={}, 释放 {} 个座位",

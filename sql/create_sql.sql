@@ -230,3 +230,48 @@ CREATE TABLE `system_config` (
                                  PRIMARY KEY (`id`),
                                  UNIQUE KEY `uk_configKey` (`configKey`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置';
+
+
+use szml;
+-- 想看影片表
+create table if not exists user_want_film
+(
+    id         bigint auto_increment comment 'id' primary key,
+    userId     bigint                                  not null comment '用户ID',
+    filmId     bigint                                  not null comment '影片ID',
+    createTime datetime default CURRENT_TIMESTAMP      not null comment '创建时间',
+    isDelete   tinyint  default 0                      not null comment '是否删除',
+    UNIQUE KEY uk_user_film (userId, filmId),
+    INDEX idx_userId (userId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户想看影片';
+
+-- 看过影片表
+create table if not exists user_watched_film
+(
+    id         bigint auto_increment comment 'id' primary key,
+    userId     bigint                                  not null comment '用户ID',
+    filmId     bigint                                  not null comment '影片ID',
+    createTime datetime default CURRENT_TIMESTAMP      not null comment '创建时间',
+    isDelete   tinyint  default 0                      not null comment '是否删除',
+    UNIQUE KEY uk_user_film (userId, filmId),
+    INDEX idx_userId (userId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户看过影片';
+
+
+use szml;
+CREATE TABLE film_review (
+                             id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+                             userId        BIGINT    NOT NULL,
+                             filmId        BIGINT    NOT NULL,
+                             orderId       BIGINT    NULL COMMENT '关联订单（购票用户可关联）',
+                             rating        TINYINT   NOT NULL COMMENT '评分 1-5',
+                             content       TEXT      NOT NULL COMMENT '影评内容',
+                             tags          VARCHAR(255) NULL COMMENT '标签，逗号分隔',
+                             helpfulCount  INT DEFAULT 0 COMMENT '有用数',
+                             commentCount  INT DEFAULT 0 COMMENT '回复数',
+                             isDelete      TINYINT DEFAULT 0,
+                             createTime    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                             KEY idx_filmId (filmId),
+                             KEY idx_userId (userId),
+                             UNIQUE KEY uk_user_film (userId, filmId)
+);
