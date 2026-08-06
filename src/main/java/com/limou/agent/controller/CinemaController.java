@@ -7,6 +7,7 @@ import com.limou.agent.common.ResultUtils;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
+import com.limou.agent.model.dto.cinema.CinemaFilterRequest;
 import com.limou.agent.service.ScheduleService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -108,6 +109,17 @@ public class CinemaController {
     @GetMapping("list")
     public BaseResponse<List<Cinema>> list() {
         return ResultUtils.success(cinemaService.list());
+    }
+
+    /**
+     * 多条件筛选影院（品牌、区域、服务、排序）。
+     *
+     * @param request 筛选条件
+     * @return 符合条件的影院列表
+     */
+    @GetMapping("filter")
+    public BaseResponse<List<Cinema>> filter(CinemaFilterRequest request) {
+        return ResultUtils.success(cinemaService.filterCinemas(request));
     }
 
     /**

@@ -102,6 +102,11 @@ public interface OrderService extends IService<Order> {
     void refundOrder(Long orderId, Long userId);
 
     /**
+     * 用户取消选座时释放锁定的座位。
+     */
+    void unlockSeat(Long scheduleId, List<Long> seatIds, Long userId);
+
+    /**
      * 释放已锁定的座位（无关联订单的锁定座位）。
      */
     int releaseOrphanLocks();
