@@ -11,6 +11,7 @@ import com.limou.agent.ai.movie.WorkflowDecision;
 import com.limou.agent.ai.movie.graph.MovieGraphWorkflow;
 import com.limou.agent.ai.movie.graph.MovieIntent;
 import com.limou.agent.ai.movie.graph.GraphResponseGenerator;
+import com.limou.agent.ai.movie.graph.GraphIntentClassifier;
 import com.limou.agent.ai.movie.graph.GraphIntentResult;
 import com.limou.agent.ai.movie.graph.SmartMovieRouter;
 import com.limou.agent.ai.movie.graph.SmartRouteResult;
@@ -66,6 +67,9 @@ public class AiServiceImpl implements AiService {
 
     @Resource
     private SmartMovieRouter smartMovieRouter;
+
+    @Resource
+    private GraphIntentClassifier intentClassifier;
 
     @Resource
     private ChatHistoryService chatHistoryService;
@@ -184,6 +188,21 @@ public class AiServiceImpl implements AiService {
                 + "\n\n## 当前用户\n"
                 + "当前登录用户ID: " + userId + "\n"
                 + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
+
+        // ★ ReAct 前用意图分类器提取槽位写回状态（ReAct 工具调用不写全票数/座位偏好等，
+        //   需提前写入，保证下一轮 Graph（如"帮我下单"）能接力拿到 cinemaId/scheduleId/ticketCount）
+        try {
+            GraphIntentResult intentResult = intentClassifier.classify(
+                    message, movieStateManager.getState(conversationId));
+            if (intentResult.getSlots() != null) {
+                movieStateManager.mergeState(conversationId, intentResult.getSlots());
+                log.info("ReAct 前置槽位写回: conversationId={}, intent={}",
+                        conversationId, intentResult.getIntent());
+            }
+        } catch (Exception e) {
+            log.warn("ReAct 前置槽位提取失败: conversationId={}", conversationId, e);
+        }
+
         StringBuilder fullResponse = new StringBuilder();
         // ★ 捕获卡片数据用于持久化（Lambda 内只能引用 effectively-final 变量，用数组做容器）
         final String[] lastCardType = {null};
