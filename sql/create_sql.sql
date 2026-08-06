@@ -299,3 +299,21 @@ CREATE TABLE `review_comment` (
                                   PRIMARY KEY (`id`),
                                   INDEX `idx_review` (`reviewId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影评评论';
+
+
+
+CREATE TABLE `review_comment_helpful` (
+                                          `id`        bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                          `userId`    bigint NOT NULL COMMENT '用户ID',
+                                          `commentId` bigint NOT NULL COMMENT '评论ID',
+                                          `isDelete`  tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+                                          `createTime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                          PRIMARY KEY (`id`),
+                                          INDEX `idx_user_comment` (`userId`, `commentId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论有用记录';
+
+
+ALTER TABLE `review_comment` ADD COLUMN `helpfulCount` int NOT NULL DEFAULT 0 COMMENT '有用数' AFTER `content`;
+
+
+ALTER TABLE `review_comment` ADD COLUMN `replyToUserId` bigint DEFAULT NULL COMMENT '实际回复的用户ID' AFTER `parentId`;
