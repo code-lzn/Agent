@@ -3,11 +3,14 @@ package com.limou.agent.service.impl;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.mapper.FilmReviewMapper;
+import com.limou.agent.mapper.ReviewHelpfulMapper;
 import com.limou.agent.model.entity.FilmReview;
+import com.limou.agent.model.entity.ReviewHelpful;
 import com.limou.agent.service.FilmReviewService;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +18,9 @@ import org.springframework.stereotype.Service;
 @Slf4j
 public class FilmReviewServiceImpl extends ServiceImpl<FilmReviewMapper, FilmReview>
         implements FilmReviewService {
+
+    @Resource
+    private ReviewHelpfulMapper reviewHelpfulMapper;
 
     @Override
     public FilmReview createReview(Long userId, Long filmId, Long orderId,
@@ -57,13 +63,35 @@ public class FilmReviewServiceImpl extends ServiceImpl<FilmReviewMapper, FilmRev
     }
 
     @Override
-    public void markHelpful(Long reviewId, Long userId) {
+    public boolean markHelpful(Long reviewId, Long userId) {
         FilmReview review = this.getById(reviewId);
         if (review == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "影评不存在");
         }
-        review.setHelpfulCount((review.getHelpfulCount() == null ? 0 : review.getHelpfulCount()) + 1);
-        this.updateById(review);
+        QueryWrapper qw = QueryWrapper.create()
+                .eq("userId", userId)
+                .eq("reviewId", reviewId);
+        ReviewHelpful existing = reviewHelpfulMapper.selectOneByQuery(qw);
+        if (existing != null) {
+            reviewHelpfulMapper.deleteById(existing.getId());
+            int cnt = Math.max(0, (review.getHelpfulCount() == null ? 0 : review.getHelpfulCount()) - 1);
+            review.setHelpfulCount(cnt);
+            this.updateById(review);
+            return false;
+        } else {
+            ReviewHelpful h = ReviewHelpful.builder().userId(userId).reviewId(reviewId).createTime(java.time.LocalDateTime.now()).build();
+            reviewHelpfulMapper.insert(h);
+            review.setHelpfulCount((review.getHelpfulCount() == null ? 0 : review.getHelpfulCount()) + 1);
+            this.updateById(review);
+            return true;
+        }
+    }
+
+    public boolean isHelpful(Long reviewId, Long userId) {
+        if (userId == null) return false;
+        return reviewHelpfulMapper.selectCountByQuery(
+                QueryWrapper.create().eq("userId", userId).eq("reviewId", reviewId)
+        ) > 0;
     }
 
     @Override
@@ -72,5 +100,10 @@ public class FilmReviewServiceImpl extends ServiceImpl<FilmReviewMapper, FilmRev
                 .eq("userId", userId)
                 .orderBy("createTime", false);
         return this.page(new Page<>(pageNum, pageSize), qw);
+    }
+
+    @Override
+    public long countByFilmId(Long filmId) {
+        return this.count(QueryWrapper.create().eq("filmId", filmId));
     }
 }
