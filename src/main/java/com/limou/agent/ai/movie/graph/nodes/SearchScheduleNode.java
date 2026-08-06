@@ -46,6 +46,27 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
             return state;
         }
 
+        // ★ 安全网：cinemaId 未解析时不能查场次（用户可能没选影院，查全城场次体验差）
+        if (convState.getCinemaId() == null && convState.getCinemaName() == null) {
+            String error = "{\"error\":\"请先选择影院\",\"diagnosis\":\"cinema_required\",\"hint\":\"用户尚未指定影院，请引导用户选择观影城市和影院后再查场次\"}";
+            state.setToolResult(error);
+            state.setToolName(MovieIntent.SEARCH_SCHEDULE.getCode());
+            log.warn("SearchSchedule 被阻止: cinemaId=null, cinemaName=null, conversationId={}",
+                    state.getConversationId());
+            return state;
+        }
+
+        // ★ 安全网：有影院名但缺 cinemaId，提示先查影院
+        if (convState.getCinemaId() == null && convState.getCinemaName() != null) {
+            String error = "{\"error\":\"影院ID缺失，请先调用 searchCinemas 获取影院ID\",\"cinemaName\":\""
+                    + convState.getCinemaName() + "\",\"diagnosis\":\"cinema_id_missing\"}";
+            state.setToolResult(error);
+            state.setToolName(MovieIntent.SEARCH_SCHEDULE.getCode());
+            log.warn("SearchSchedule 被阻止: cinemaId=null, cinemaName={}, conversationId={}",
+                    convState.getCinemaName(), state.getConversationId());
+            return state;
+        }
+
         String result = tool.searchSchedules(
                 convState.getFilmId(),
                 convState.getCinemaId(),

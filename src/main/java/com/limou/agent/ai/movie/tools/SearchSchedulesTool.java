@@ -241,6 +241,12 @@ public class SearchSchedulesTool extends BaseTool {
             result.put("sessions", sessionList);
             result.put("total", sessionList.size());
 
+            // ★ 诊断信息：帮助 LLM 识别"查不到是因为缺影院"的情况
+            if (cinemaId == null && sessionList.isEmpty() && filmId != null) {
+                result.put("diagnosis", "cinema_not_specified");
+                result.put("diagnosisHint", "未指定影院ID，已搜索全部影院的场次但未找到匹配结果。建议引导用户先选择影院再搜索。");
+            }
+
             String json = objectMapper.writeValueAsString(result);
             log.info("searchSchedules 查询结果: filmId={}, cinemaId={}, showDate={}, hallType={}, startTime={}, 找到{}个场次",
                     filmId, cinemaId, showDate, hallType, startTime, sessionList.size());

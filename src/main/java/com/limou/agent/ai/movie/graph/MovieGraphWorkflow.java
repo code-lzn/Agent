@@ -217,6 +217,7 @@ public class MovieGraphWorkflow {
         return switch (intent) {
             case "search_movie"   -> "film_list";
             case "search_cinema"  -> "cinema_list";
+            case "search_nearby"  -> "cinema_list";
             case "search_schedule"-> "schedule_list";
             case "get_seat_map"   -> "seat_map";
             case "lock_seats"     -> isSuccessResult(toolResult) ? "seats_confirmed" : "seat_alternatives";

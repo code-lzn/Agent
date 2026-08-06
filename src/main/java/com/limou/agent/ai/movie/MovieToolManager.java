@@ -46,6 +46,9 @@ public class MovieToolManager {
     @Resource
     private GetUserPreferenceTool getUserPreferenceTool;
 
+    @Resource
+    private SearchNearbyCinemasTool searchNearbyCinemasTool;
+
     @Autowired(required = false)
     @Qualifier("mcpToolCallbacks")
     private ToolCallbackProvider mcpToolCallbackProvider;
@@ -64,7 +67,8 @@ public class MovieToolManager {
                 lockSeatsTool,
                 createOrderTool,
                 payOrderTool,
-                getUserPreferenceTool);
+                getUserPreferenceTool,
+                searchNearbyCinemasTool);
 
         ToolCallback[] mcp = mcpToolCallbackProvider != null
                 ? mcpToolCallbackProvider.getToolCallbacks()
@@ -92,6 +96,7 @@ public class MovieToolManager {
         map.put(createOrderTool.getToolName(), createOrderTool.getDisplayName());
         map.put(payOrderTool.getToolName(), payOrderTool.getDisplayName());
         map.put(getUserPreferenceTool.getToolName(), getUserPreferenceTool.getDisplayName());
+        map.put(searchNearbyCinemasTool.getToolName(), searchNearbyCinemasTool.getDisplayName());
         return map;
     }
 }
