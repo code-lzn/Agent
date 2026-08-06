@@ -758,4 +758,31 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         return vo;
     }
+
+    @Override
+    public Long findCompletedOrderId(Long userId, Long filmId) {
+        if (userId == null || filmId == null) {
+            return null;
+        }
+        // 查出该影片的所有场次ID
+        List<Long> scheduleIds = scheduleService.list(
+                        QueryWrapper.create().eq("filmId", filmId))
+                .stream()
+                .map(Schedule::getId)
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(scheduleIds)) {
+            return null;
+        }
+        // 找用户对这些场次的已支付/已完成订单，取最新一条
+        Order order = this.getOne(
+                QueryWrapper.create()
+                        .eq("userId", userId)
+                        .in("scheduleId", scheduleIds)
+                        .in("status", java.util.List.of(
+                                OrderStatusEnum.PAID.getValue(),
+                                OrderStatusEnum.COMPLETED.getValue()))
+                        .orderBy("paidAt", false)
+                        .limit(1));
+        return order != null ? order.getId() : null;
+    }
 }
