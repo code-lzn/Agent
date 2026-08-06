@@ -716,4 +716,19 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         return vo;
     }
+
+    @Override
+    public Long findCompletedOrderId(Long userId, Long filmId) {
+        List<Schedule> schedules = scheduleService.list(
+                QueryWrapper.create().eq("filmId", filmId));
+        if (CollUtil.isEmpty(schedules)) return null;
+        List<Long> scheduleIds = schedules.stream().map(Schedule::getId).collect(Collectors.toList());
+        QueryWrapper qw = QueryWrapper.create()
+                .eq("userId", userId)
+                .in("scheduleId", scheduleIds)
+                .in("status", List.of("paid", "completed"))
+                .orderBy("createTime", false);
+        Order order = this.getOne(qw);
+        return order != null ? order.getId() : null;
+    }
 }
