@@ -1,5 +1,6 @@
 package com.limou.agent.service.impl;
 
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
@@ -188,7 +189,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     .hallName(hall != null ? hall.getName() : null)
                     .totalPrice(totalPrice)
                     .count(count)
-                    .status(OrderStatusEnum.PENDING.getValue())
+                    .status("pending")
                     .expireAt(LocalDateTime.now().plusMinutes(getLockDuration()))
                     .build();
             this.save(order);
@@ -507,13 +508,29 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if ("expired".equals(order.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法退票");
         }
-
-        // 开场前1分钟内不可退票
         try {
             DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            Schedule schedule = scheduleService.getById(order.getScheduleId());
+            if (schedule != null && schedule.getEndTime() != null && schedule.getShowDate() != null) {
+                LocalDateTime endTime = LocalDateTime.of(
+                    schedule.getShowDate().toLocalDate(),
+                    java.time.LocalTime.parse(schedule.getEndTime()));
+                if (LocalDateTime.now().isAfter(endTime)) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已过期，无法退票");
+                }
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("检查放映结束时间失败: orderId={}", orderId, e);
+        }
+
+        // 时间维度拦截：已开场 / 开场前1分钟内
+        try {
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
-            long diffMinutes = java.time.Duration.between(LocalDateTime.now(), showTime).toMinutes();
-            if (diffMinutes < 1) {
+            long diffSeconds = java.time.Duration.between(LocalDateTime.now(), showTime).getSeconds();
+            if (diffSeconds < 60) {
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "开场前1分钟内不支持退票");
             }
         } catch (BusinessException e) {
