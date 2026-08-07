@@ -223,9 +223,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }).collect(Collectors.toList());
             orderSeatService.saveBatch(orderSeats);
             // 座位状态已由 lockSeats 置为 locked，无需重复更新
-
-            // 8. 每座位生成一张票（独立 8 位取票码，可分次核销）
-            ticketService.createTickets(order.getId(), schedule.getId(), seats);
+            // 票不在下单时生成，支付成功后才生成（见 handlePaymentSuccess / mockPayOrder）
 
             log.info("用户 {} 创建订单 {}，座位: {}", userId, orderNo,
                     seats.stream().map(Seat::getSeatLabel).collect(Collectors.joining(",")));
@@ -297,6 +295,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             List<Seat> seats = seatService.listByIds(seatIds);
             seats.forEach(s -> s.setStatus("sold"));
             seatService.updateBatch(seats);
+            // 支付成功才生成票：每座位一张（独立 8 位取票码）；幂等避免重复生成
+            ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
         }
 
         log.info("用户 {} 模拟支付成功，订单号: {}", userId, order.getOrderNo());

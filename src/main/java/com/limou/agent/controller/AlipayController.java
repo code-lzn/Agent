@@ -10,6 +10,7 @@ import com.limou.agent.service.OrderSeatService;
 import com.limou.agent.service.OrderService;
 import com.limou.agent.service.SeatLockService;
 import com.limou.agent.service.SeatService;
+import com.limou.agent.service.TicketService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +54,9 @@ public class AlipayController {
 
     @Autowired
     private OrderStatusNotifier orderStatusNotifier;
+
+    @Autowired
+    private TicketService ticketService;
 
     /**
      * 浏览器直接打开即可跳转支付宝沙箱收银台。
@@ -170,6 +174,9 @@ public class AlipayController {
             List<Seat> seats = seatService.listByIds(seatIds);
             seats.forEach(s -> s.setStatus("sold"));
             seatService.updateBatch(seats);
+
+            // 支付成功才生成票：每座位一张（独立 8 位取票码，可分次核销）；幂等避免异步通知重复生成
+            ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
 
             // 清理 Redis 锁集合
             seatLockService.releaseSeats(order.getScheduleId(), seatIds);

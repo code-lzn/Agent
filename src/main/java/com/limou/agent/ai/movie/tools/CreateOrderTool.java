@@ -153,6 +153,8 @@ public class CreateOrderTool extends BaseTool {
                 seatLabels.add(seat.getSeatLabel());
             }
 
+            // 6.5 票不在下单时生成，支付成功后才生成（见 AlipayController.handlePaymentSuccess）
+
             // 7. 发送延时消息到 RabbitMQ：15 分钟后检查是否已支付
             try {
                 OrderTimeoutMessage msg = OrderTimeoutMessage.builder()

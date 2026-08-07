@@ -67,6 +67,12 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
         if (orderId == null || scheduleId == null || CollUtil.isEmpty(seats)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数无效");
         }
+        // 幂等：订单已有票则跳过（普通订单下单时已生成，支付成功/重复调用时不再重复生成）
+        List<Ticket> existingTickets = listByOrder(orderId);
+        if (CollUtil.isNotEmpty(existingTickets)) {
+            log.info("订单 {} 已有 {} 张票，跳过生成", orderId, existingTickets.size());
+            return existingTickets;
+        }
         // 现有取票码集合（唯一索引 uk_ticketCode 兜底，这里先查重避免批量冲突）
         Set<String> existing = mapper.selectListByQuery(QueryWrapper.create().select("ticketCode"))
                 .stream().map(Ticket::getTicketCode).collect(Collectors.toSet());
