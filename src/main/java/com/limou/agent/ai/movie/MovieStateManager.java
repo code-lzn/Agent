@@ -215,12 +215,14 @@ public class MovieStateManager {
             searchPhaseChanged = true;
         }
 
-        // 上游变了 → 下游作废
+        // 上游变了 → 下游作废（清场次/座位/订单；保留已选日期与时间——用户换厅/换片不改变观影日期）
         if (searchPhaseChanged) {
             state.setScheduleId(null);
             state.setHallName(null);
-            state.setShowDate(null);
-            state.setStartTime(null);
+            // 换影院/换片/换日期时，本轮未指定厅型则清除残留 hallType（旧厅型会把新影院的场次全部过滤掉）
+            if (newSlots.getHallType() == null) {
+                state.setHallType(null);
+            }
             state.setSeatIds(null);
             state.setSeatLabels(null);
             state.setOrderId(null);

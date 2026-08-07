@@ -53,7 +53,7 @@ public class AiCodeGeneratorFactory {
     private RedissonClient redissonClient;
     @Resource
     private ObjectMapper objectMapper;
-//    @Resource
+    @Resource
     private DocumentRagService documentRagService;
 
     private final Cache<Long, ChatClient> clientCache = Caffeine.newBuilder()
@@ -173,7 +173,7 @@ public class AiCodeGeneratorFactory {
                 .defaultSystem(systemPrompt)
                 .defaultToolCallbacks(wrappedTools)
                 .defaultAdvisors(
-                        // QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
+                         QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build())
                 .build();
 
@@ -270,9 +270,15 @@ public class AiCodeGeneratorFactory {
         chatHistoryService.loadChatHistory(Long.valueOf(conversationId), chatMemory, 20);
         return ChatClient.builder(chatModel).build()
                 .prompt().user(prompt)
-                .advisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .advisors(
+                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                        QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build()
+                )
                 .stream().content();
     }
+//     .defaultAdvisors(
+//                         QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
+//                        MessageChatMemoryAdvisor.builder(chatMemory).build())
 
     public <T> Optional<T> doAgentChatStructured(String message, String conversationId, Class<T> outputType) {
         ReactAgent agent = getOrCreateAgent(conversationId, "structured-ReAct-agent");

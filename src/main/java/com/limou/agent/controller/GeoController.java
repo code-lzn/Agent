@@ -24,12 +24,12 @@ import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 
-//@RestController
+@RestController
 @RequestMapping("/geo")
 @Slf4j
 public class GeoController {
 
-    @Value("${amap.web-service-key}")
+    @Value("${amap.api-key}")
     private String amapWebServiceKey;
 
     /**

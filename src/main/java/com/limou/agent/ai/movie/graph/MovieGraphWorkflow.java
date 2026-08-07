@@ -59,6 +59,9 @@ public class MovieGraphWorkflow {
     private SearchCinemasTool searchCinemasTool;
 
     @Resource
+    private SearchNearbyCinemasTool searchNearbyCinemasTool;
+
+    @Resource
     private SearchSchedulesTool searchSchedulesTool;
 
     @Resource
@@ -87,9 +90,10 @@ public class MovieGraphWorkflow {
                 .addNode("intent_classify", new IntentClassifyNode(graphIntentClassifier, movieStateManager))
                 .addNode("search_film",     new SearchFilmNode(searchFilmsTool, movieStateManager))
                 .addNode("search_cinema",   new SearchCinemaNode(searchCinemasTool, movieStateManager))
+                .addNode("search_nearby",   new SearchNearbyNode(searchNearbyCinemasTool, movieStateManager))
                 .addNode("search_schedule", new SearchScheduleNode(searchSchedulesTool, movieStateManager))
                 .addNode("get_seat_map",    new GetSeatMapNode(getSeatMapTool))
-                .addNode("lock_seats",      new LockSeatsNode(lockSeatsTool, movieStateManager))
+                .addNode("lock_seats",      new LockSeatsNode(lockSeatsTool, getSeatMapTool, searchSchedulesTool, movieStateManager))
                 .addNode("create_order",    new CreateOrderNode(createOrderTool, movieStateManager))
                 .addNode("pay_order",       new PayOrderNode(payOrderTool))
 
@@ -104,6 +108,7 @@ public class MovieGraphWorkflow {
                         Map.of(
                                 "search_movie",   "search_film",
                                 "search_cinema",  "search_cinema",
+                                "search_nearby",  "search_nearby",
                                 "search_schedule","search_schedule",
                                 "get_seat_map",   "get_seat_map",
                                 "lock_seats",     "lock_seats",
@@ -116,9 +121,14 @@ public class MovieGraphWorkflow {
                 // 所有工具执行完 → END
                 .addEdge("search_film",    StateGraph.END)
                 .addEdge("search_cinema",  StateGraph.END)
+                .addEdge("search_nearby",  StateGraph.END)
                 .addEdge("search_schedule",StateGraph.END)
                 .addEdge("get_seat_map",   StateGraph.END)
-                .addEdge("lock_seats",     StateGraph.END)
+                // ★ 锁座成功后自动创建订单（先锁座、再下单一条龙），失败则结束（展示替代座位）
+                .addConditionalEdges("lock_seats",
+                        MovieGraphState::lockRouteKey,
+                        Map.of("success", "create_order"),
+                        StateGraph.END)
                 .addEdge("create_order",   StateGraph.END)
                 .addEdge("pay_order",      StateGraph.END)
 
@@ -181,12 +191,16 @@ public class MovieGraphWorkflow {
         String cardType = null;
         Map<String, Object> cardData = null;
         if (hasTool) {
-            cardType = cardTypeForIntent(intent, toolResult);
+            // 用实际执行的工具名判断卡片类型：锁座+下单串联后最终 toolName=create_order → 出订单卡片
+            String effectiveIntent = result.getToolName() != null ? result.getToolName() : intent;
+            cardType = cardTypeForIntent(effectiveIntent, toolResult);
             cardData = parseCardData(toolResult);
         }
 
-        log.info("GraphWorkflow 完成: intent={}, hasToolResult={}, cardType={}, blocked={}",
-                intent, hasTool, cardType, result.isBlocked());
+        log.info("GraphWorkflow 完成: intent={}, hasToolResult={}, cardType={}, toolResult={}, blocked={}",
+                intent, hasTool, cardType,
+                toolResult != null && toolResult.length() > 250 ? toolResult.substring(0, 250) + "…" : toolResult,
+                result.isBlocked());
 
         return WorkflowDecision.builder()
                 .blocked(result.isBlocked())

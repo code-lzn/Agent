@@ -8,6 +8,13 @@ spring:
 #    password: LZNlzn123.
 #
 #      # Redis 配置
+  rabbitmq:
+    host: 106.52.200.236
+    port: 5672
+    password: 123456
+    username: limou
+    virtual-host: bthost   # 👈 关键！必须和截图里的 bthost 完全一致
+
   data:
     redis:
       database: ${spring.data.redis.database}
@@ -127,7 +134,7 @@ alipay:
   # 服务器异步通知页面路径 - natapp 内网穿透
   notify_url: http://lbljh.nat100.top/api/payment/alipay/notify
   # 页面跳转同步通知页面路径
-  return_url: https://gaga.plus
+  return_url: http://192.168.13.1:8123/api/payment/alipay/return
   # 沙箱网关地址
   gatewayUrl: https://openapi-sandbox.dl.alipaydev.com/gateway.do
   sign_type: RSA2

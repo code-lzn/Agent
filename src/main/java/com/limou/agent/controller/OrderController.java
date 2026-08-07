@@ -11,6 +11,7 @@ import com.limou.agent.model.dto.order.LockSeatRequest;
 import com.limou.agent.model.dto.order.PayOrderRequest;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.User;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.model.vo.OrderVO;
 import com.limou.agent.model.vo.PayOrderVO;
 import com.limou.agent.service.OrderService;
@@ -201,7 +202,7 @@ public class OrderController {
         Order order = orderService.getById(id);
         ThrowUtils.throwIf(order == null, ErrorCode.NOT_FOUND_ERROR, "订单不存在");
         // 待支付订单 → 管理员取消；已支付订单 → 管理员退款（原因区分，不再显示"用户主动取消"）
-        String reason = "paid".equals(order.getStatus()) ? "admin_refund" : "admin_cancelled";
+        String reason = OrderStatusEnum.PAID.getValue().equals(order.getStatus()) ? "admin_refund" : "admin_cancelled";
         orderService.cancelOrder(id, reason);
         return ResultUtils.success(true);
     }

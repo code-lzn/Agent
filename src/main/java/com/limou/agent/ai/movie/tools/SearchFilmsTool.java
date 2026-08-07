@@ -8,7 +8,6 @@ import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.FilmMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.Film;
-import com.limou.agent.model.enums.FilmStatusEnum;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -16,9 +15,12 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 /**
@@ -38,35 +40,48 @@ public class SearchFilmsTool extends BaseTool {
     @Resource
     private MovieStateManager stateManager;
 
-    @Tool(description = "搜索影片，支持按名称关键词和影片类型筛选。返回影片列表JSON，包含影片ID、名称、类型、评分、时长、海报、简介")
+    @Tool(description = "搜索影片，支持按名称关键词和影片类型筛选。返回影片列表JSON，包含影片ID、名称、类型、评分、时长、海报、简介。最多返回5部，推荐时向用户展示3-5部即可，不要全部列出")
     public String searchFilms(
             @ToolParam(description = "影片名称关键词（可选）") String keyword,
             @ToolParam(description = "影片类型，如 喜剧/动作/科幻/悬疑（可选）") String type,
             @ToolParam(description = "排序方式: rating_desc(按评分降序，默认) / rating_asc") String sort
     ) {
         try {
-            QueryWrapper wrapper = QueryWrapper.create()
-                    .eq(Film::getStatus, FilmStatusEnum.PUBLISHED.getValue());
+            List<Film> films;
+            boolean isRecommendation = (keyword == null || keyword.isBlank())
+                    && (type == null || type.isBlank());
 
-            // 关键词搜索：按名称模糊匹配
-            if (keyword != null && !keyword.isBlank()) {
-                wrapper.like(Film::getName, keyword);
-            }
-            // 类型筛选
-            if (type != null && !type.isBlank()) {
-                wrapper.like(Film::getType, type);
-            }
-
-            // 按评分排序
-            if ("rating_asc".equals(sort)) {
-                wrapper.orderBy(Film::getRating, true);
+            if (isRecommendation) {
+                // ★ 推荐场景（无关键词/类型）：从可上映影片中随机挑 3-5 部，避免每次固定同一批高分片
+                List<Film> all = filmMapper.selectListByQuery(
+                        QueryWrapper.create()
+                                // 可上映影片：热映 hot + 正在上映 published 都可推荐（草稿/下线不展示）
+                                .in(Film::getStatus, List.of("hot", "published")));
+                Collections.shuffle(all);
+                int randomCount = 3 + new Random().nextInt(3); // 3 ~ 5 随机
+                films = all.stream()
+                        .limit(randomCount)
+                        .sorted(Comparator.comparing(Film::getRating,
+                                Comparator.nullsLast(Comparator.reverseOrder())))
+                        .collect(Collectors.toList());
             } else {
-                wrapper.orderBy(Film::getRating, false);
+                // 搜索场景（用户点名/按类型）：按关键词匹配 + 评分排序，最多 5 部
+                QueryWrapper wrapper = QueryWrapper.create()
+                        .in(Film::getStatus, List.of("hot", "published"));
+                if (keyword != null && !keyword.isBlank()) {
+                    wrapper.like(Film::getName, keyword);
+                }
+                if (type != null && !type.isBlank()) {
+                    wrapper.like(Film::getType, type);
+                }
+                if ("rating_asc".equals(sort)) {
+                    wrapper.orderBy(Film::getRating, true);
+                } else {
+                    wrapper.orderBy(Film::getRating, false);
+                }
+                wrapper.limit(5);
+                films = filmMapper.selectListByQuery(wrapper);
             }
-
-            wrapper.limit(10);
-
-            List<Film> films = filmMapper.selectListByQuery(wrapper);
 
             List<Map<String, Object>> filmList = films.stream().map(f -> {
                 Map<String, Object> map = new HashMap<>();

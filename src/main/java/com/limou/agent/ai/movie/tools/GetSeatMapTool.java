@@ -2,8 +2,11 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.limou.agent.ai.movie.ConversationContext;
+import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.HallMapper;
+import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.mapper.SeatMapper;
 import com.limou.agent.model.entity.Hall;
@@ -43,6 +46,9 @@ public class GetSeatMapTool extends BaseTool {
 
     @Resource
     private RedissonClient redissonClient;
+
+    @Resource
+    private MovieStateManager stateManager;
 
     @Tool(description = "获取指定场次的座位图，返回二维座位矩阵JSON。每个座位包含 seatId、行列号、标签、区域(vip/regular)、状态(available/locked/sold)、价格")
     public String getSeatMap(
@@ -111,7 +117,7 @@ public class GetSeatMapTool extends BaseTool {
                     Seat seat = seatMap.get(key);
                     if (seat != null) {
                         Map<String, Object> seatInfo = new HashMap<>();
-                        seatInfo.put("seatId", seat.getId());
+                        seatInfo.put("seatId", seat.getId().toString()); // 雪花 ID 字符串化，避免前端精度丢失
                         seatInfo.put("rowNum", seat.getRowNum());
                         seatInfo.put("colNum", seat.getColNum());
                         seatInfo.put("seatLabel", seat.getSeatLabel());
@@ -157,6 +163,24 @@ public class GetSeatMapTool extends BaseTool {
             result.put("availableCount", availableCount);
             result.put("lockedCount", lockedCount);
             result.put("soldCount", soldCount);
+
+            // ★ ReAct 模式下 LLM 直接调此工具，需把 scheduleId 写回对话状态，供后续 Graph 接力下单
+            String convId = ConversationContext.get();
+            if (convId != null) {
+                try {
+                    ConversationState convState = stateManager.getState(convId);
+                    convState.setScheduleId(scheduleId);
+                    if (hall != null) convState.setHallName(hall.getName());
+                    if (schedule != null) {
+                        if (schedule.getFilmId() != null) convState.setFilmId(schedule.getFilmId());
+                        if (schedule.getCinemaId() != null) convState.setCinemaId(schedule.getCinemaId());
+                    }
+                    stateManager.saveState(convId, convState);
+                    log.info("getSeatMap 写回 scheduleId={}: conversationId={}", scheduleId, convId);
+                } catch (Exception e) {
+                    log.warn("getSeatMap 写回状态失败: conversationId={}", convId, e);
+                }
+            }
 
             String json = objectMapper.writeValueAsString(result);
             log.info("getSeatMap: scheduleId={}, rows={}, cols={}, available={}, locked={}, sold={}",

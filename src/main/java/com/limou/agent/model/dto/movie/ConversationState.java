@@ -233,6 +233,14 @@ public class ConversationState implements Serializable {
             sb.append("状态: 信息齐全，可直接下单\n");
         }
 
+        // 最近搜索结果摘要（卡片数据），供后续轮次引用（如"第二个场次"、"这个场次是哪个影院"）
+        if (lastSearchContext != null && !lastSearchContext.isBlank()) {
+            String ctx = lastSearchContext.length() > 400
+                    ? lastSearchContext.substring(0, 400) + "…"
+                    : lastSearchContext;
+            sb.append("最近搜索结果摘要: ").append(ctx).append("\n");
+        }
+
         sb.append("---\n");
         return sb.toString();
     }

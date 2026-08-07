@@ -230,3 +230,90 @@ CREATE TABLE `system_config` (
                                  PRIMARY KEY (`id`),
                                  UNIQUE KEY `uk_configKey` (`configKey`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置';
+
+
+use szml;
+-- 想看影片表
+create table if not exists user_want_film
+(
+    id         bigint auto_increment comment 'id' primary key,
+    userId     bigint                                  not null comment '用户ID',
+    filmId     bigint                                  not null comment '影片ID',
+    createTime datetime default CURRENT_TIMESTAMP      not null comment '创建时间',
+    isDelete   tinyint  default 0                      not null comment '是否删除',
+    UNIQUE KEY uk_user_film (userId, filmId),
+    INDEX idx_userId (userId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户想看影片';
+
+-- 看过影片表
+create table if not exists user_watched_film
+(
+    id         bigint auto_increment comment 'id' primary key,
+    userId     bigint                                  not null comment '用户ID',
+    filmId     bigint                                  not null comment '影片ID',
+    createTime datetime default CURRENT_TIMESTAMP      not null comment '创建时间',
+    isDelete   tinyint  default 0                      not null comment '是否删除',
+    UNIQUE KEY uk_user_film (userId, filmId),
+    INDEX idx_userId (userId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户看过影片';
+
+
+use szml;
+CREATE TABLE film_review (
+                             id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+                             userId        BIGINT    NOT NULL,
+                             filmId        BIGINT    NOT NULL,
+                             orderId       BIGINT    NULL COMMENT '关联订单（购票用户可关联）',
+                             rating        TINYINT   NOT NULL COMMENT '评分 1-5',
+                             content       TEXT      NOT NULL COMMENT '影评内容',
+                             tags          VARCHAR(255) NULL COMMENT '标签，逗号分隔',
+                             helpfulCount  INT DEFAULT 0 COMMENT '有用数',
+                             commentCount  INT DEFAULT 0 COMMENT '回复数',
+                             isDelete      TINYINT DEFAULT 0,
+                             createTime    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                             KEY idx_filmId (filmId),
+                             KEY idx_userId (userId),
+                             UNIQUE KEY uk_user_film (userId, filmId)
+);
+
+-- 影评有用记录表
+CREATE TABLE `review_helpful` (
+                                  `id`       bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                  `userId`   bigint NOT NULL COMMENT '用户ID',
+                                  `reviewId` bigint NOT NULL COMMENT '影评ID',
+                                  `isDelete` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除 0-未删 1-已删',
+                                  `createTime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  PRIMARY KEY (`id`),
+                                  INDEX `idx_user_review` (`userId`, `reviewId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影评有用记录';
+
+-- 影评评论表
+CREATE TABLE `review_comment` (
+                                  `id`       bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                  `reviewId` bigint NOT NULL COMMENT '影评ID',
+                                  `userId`   bigint NOT NULL COMMENT '评论用户ID',
+                                  `parentId` bigint DEFAULT NULL COMMENT '父评论ID，NULL表示直接评论影评',
+                                  `content`  varchar(500) NOT NULL COMMENT '评论内容',
+                                  `isDelete` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除 0-未删 1-已删',
+                                  `createTime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                  PRIMARY KEY (`id`),
+                                  INDEX `idx_review` (`reviewId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影评评论';
+
+
+
+CREATE TABLE `review_comment_helpful` (
+                                          `id`        bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                          `userId`    bigint NOT NULL COMMENT '用户ID',
+                                          `commentId` bigint NOT NULL COMMENT '评论ID',
+                                          `isDelete`  tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+                                          `createTime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                          PRIMARY KEY (`id`),
+                                          INDEX `idx_user_comment` (`userId`, `commentId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论有用记录';
+
+
+ALTER TABLE `review_comment` ADD COLUMN `helpfulCount` int NOT NULL DEFAULT 0 COMMENT '有用数' AFTER `content`;
+
+
+ALTER TABLE `review_comment` ADD COLUMN `replyToUserId` bigint DEFAULT NULL COMMENT '实际回复的用户ID' AFTER `parentId`;

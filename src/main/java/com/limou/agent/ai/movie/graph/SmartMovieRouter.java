@@ -35,6 +35,11 @@ public class SmartMovieRouter {
     private static final Pattern CANCEL_PATTERN = Pattern.compile("(算了|不买了|取消|不要了|放弃|改天|下次)");
     private static final Pattern NEARBY_CINEMA_PATTERN = Pattern.compile(
             "(附近|周边|本地|离我近).{0,8}(影院|影城)|(影院|影城).{0,8}(附近|周边|有哪些)");
+    /** ★ 纯地理位置名 — 用户没说影院品牌，而是说了一个地点/地标名，应走附近搜索 */
+    private static final Pattern LOCATION_NAME_PATTERN = Pattern.compile(
+            "(大学|学院|学校|校区|广场|商场|购物中心|百货|火车站|高铁站|机场|地铁站|汽车站|公交站"
+                    + "|小区|社区|花园|公寓|写字楼|大厦|中心|医院|体育馆|图书馆|公园|景区|乐园|古城|古镇"
+                    + "|街|路|大道|商圈|步行街|小吃街|美食街|万达广场|大悦城|万象城|银泰|来福士|吾悦)");
     private static final Pattern MOVIE_DISCOVERY_PATTERN = Pattern.compile(
             "(推荐|最近|现在|当前).{0,8}(电影|影片|热映|新片)|(热映|新片).{0,8}(哪些|推荐|电影)");
 
@@ -76,6 +81,17 @@ public class SmartMovieRouter {
             return SmartRouteResult.react();
         }
 
+        // ★ 纯地理位置名（大学/广场/火车站等），不含影院品牌 → search_nearby
+        if (matches(LOCATION_NAME_PATTERN, message) && !matches(CINEMA_HINT, message)) {
+            log.info("Router: 规则命中 地理位置名 → GRAPH (search_nearby)");
+            ConversationState locSlots = new ConversationState();
+            locSlots.setCinemaName(message.trim());  // 作为地理位置描述传入
+            return SmartRouteResult.graph(GraphIntentResult.builder()
+                    .intent("search_nearby")
+                    .slots(locSlots)
+                    .build());
+        }
+
         if (matches(MOVIE_DISCOVERY_PATTERN, message)) {
             log.info("Router: 规则命中 影片发现 → GRAPH");
             return SmartRouteResult.graph(directIntent("search_movie"));
@@ -85,6 +101,14 @@ public class SmartMovieRouter {
         if (hasExistingContext(state)) {
             log.info("Router: 已有上下文(film={}, cinema={}, schedule={}) → GRAPH",
                     state.getFilmId(), state.getCinemaId(), state.getScheduleId());
+            return SmartRouteResult.graph(null);
+        }
+
+        // ★ 明确购票意图（订/买/购/下单/选座…票座）+ 已有影片 → 走 Graph 的确定性锁座下单链路
+        //   （Graph 内 LockSeatsNode 自动解析场次 → 自动选座 → 锁座 → 条件边 create_order，一次完成；
+        //     避免 ReAct 下 LLM 工具调用不稳定——只锁座停下/重复下单）
+        if (matches(BOOKING_KEYWORD, message) && state != null && state.getFilmId() != null) {
+            log.info("Router: 购票意图 + 已有影片 → GRAPH (确定性锁座下单)");
             return SmartRouteResult.graph(null);
         }
 

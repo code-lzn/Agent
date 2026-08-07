@@ -57,5 +57,10 @@ public class LoginUserVO implements Serializable {
      */
     private Boolean needSetPassword;
 
+    /**
+     * JWT Token（微信扫码登录时返回，前端存入 localStorage 后每次请求携带于 Authorization header）
+     */
+    private String token;
+
     private static final long serialVersionUID = 1L;
 }

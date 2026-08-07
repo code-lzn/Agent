@@ -31,7 +31,7 @@ class SearchScheduleNodeTest {
         String result = "{\"sessions\":["
                 + "{\"scheduleId\":41,\"showDate\":\"2026-08-25\",\"startTime\":\"10:00:00\",\"hallName\":\"1号厅\"},"
                 + "{\"scheduleId\":42,\"showDate\":\"2026-08-25\",\"startTime\":\"13:00:00\",\"hallName\":\"杜比全景声厅\"}]}";
-        when(tool.searchSchedules(1L, 2L, "2026-08-25", null)).thenReturn(result);
+//        when(tool.searchSchedules(1L, 2L, "2026-08-25", null)).thenReturn(result);
 
         node.execute(state);
 

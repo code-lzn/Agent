@@ -3,9 +3,11 @@ package com.limou.agent.ai.movie.tools;
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.tools.BaseTool;
+import com.limou.agent.mapper.CinemaMapper;
 import com.limou.agent.mapper.HallMapper;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.mapper.SeatMapper;
+import com.limou.agent.model.entity.Cinema;
 import com.limou.agent.model.entity.Hall;
 import com.limou.agent.model.entity.Schedule;
 import com.limou.agent.model.entity.Seat;
@@ -40,6 +42,9 @@ public class SearchSchedulesTool extends BaseTool {
 
     @Resource
     private SeatMapper seatMapper;
+
+    @Resource
+    private CinemaMapper cinemaMapper;
 
     @Resource
     private ObjectMapper objectMapper;
@@ -123,6 +128,20 @@ public class SearchSchedulesTool extends BaseTool {
                 }
             }
 
+            // 影院信息（卡片/AI 需要展示影院名）
+            Set<Long> cinemaIds = schedules.stream()
+                    .map(Schedule::getCinemaId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            Map<Long, Cinema> cinemaMap = new HashMap<>();
+            if (!cinemaIds.isEmpty()) {
+                List<Cinema> cinemas = cinemaMapper.selectListByQuery(
+                        QueryWrapper.create().in(Cinema::getId, cinemaIds));
+                for (Cinema cinema : cinemas) {
+                    cinemaMap.put(cinema.getId(), cinema);
+                }
+            }
+
             // 3. 构建返回结果（含余座统计）
             List<Map<String, Object>> sessionList = new ArrayList<>();
             for (Schedule s : schedules) {
@@ -164,15 +183,12 @@ public class SearchSchedulesTool extends BaseTool {
                     }
                 }
 
-                // ★ 时间范围过滤 —— 只保留目标时间前后3小时内的场次
+                // ★ 时间距离计算 —— 不再硬过滤（"下午→14:00"±3小时窗口会漏掉合理场次），仅用于排序
                 long timeDiffMinutes = 0;
                 if (targetTime != null && s.getStartTime() != null) {
                     try {
                         LocalTime scheduleTime = LocalTime.parse(s.getStartTime());
                         timeDiffMinutes = Math.abs(ChronoUnit.MINUTES.between(targetTime, scheduleTime));
-                        if (timeDiffMinutes > 180) { // 超过3小时 → 跳过
-                            continue;
-                        }
                     } catch (Exception ignored) {}
                 }
 
@@ -190,10 +206,12 @@ public class SearchSchedulesTool extends BaseTool {
                 );
 
                 Map<String, Object> map = new HashMap<>();
-                map.put("scheduleId", s.getId());
-                map.put("filmId", s.getFilmId());
-                map.put("cinemaId", s.getCinemaId());
-                map.put("hallId", s.getHallId());
+                map.put("scheduleId", s.getId().toString()); // 雪花 ID 用字符串，避免前端精度丢失
+                map.put("filmId", String.valueOf(s.getFilmId()));
+                map.put("cinemaId", String.valueOf(s.getCinemaId()));
+                Cinema cinema = cinemaMap.get(s.getCinemaId());
+                map.put("cinemaName", cinema != null ? cinema.getName() : null);
+                map.put("hallId", String.valueOf(s.getHallId()));
                 map.put("hallName", hall.getName());
                 map.put("hallType", hall.getHallType());
                 map.put("showDate", s.getShowDate() != null ? s.getShowDate().toString() : null);

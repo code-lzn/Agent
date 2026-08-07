@@ -7,6 +7,8 @@ import com.limou.agent.mapper.OrderMapper;
 import com.limou.agent.mapper.OrderSeatMapper;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.OrderSeat;
+import com.limou.agent.model.enums.CancelReasonEnum;
+import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.service.AlipayService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
@@ -53,7 +55,7 @@ public class PayOrderTool extends BaseTool {
                 return "{\"success\":false,\"error\":\"订单不存在\"}";
             }
 
-            if (!"pending".equals(order.getStatus())) {
+            if (!OrderStatusEnum.PENDING.getValue().equals(order.getStatus())) {
                 return "{\"success\":false,\"error\":\"订单状态异常（" + order.getStatus() + "），无法支付\"}";
             }
 
@@ -61,8 +63,8 @@ public class PayOrderTool extends BaseTool {
             if (order.getExpireAt() != null && order.getExpireAt().isBefore(LocalDateTime.now())) {
                 orderMapper.update(Order.builder()
                         .id(orderId)
-                        .status("cancelled")
-                        .cancelReason("timeout")
+                        .status(OrderStatusEnum.CANCELLED.getValue())
+                        .cancelReason(CancelReasonEnum.TIMEOUT.getValue())
                         .build());
                 return "{\"success\":false,\"error\":\"订单已超时取消，请重新选座下单\"}";
             }
