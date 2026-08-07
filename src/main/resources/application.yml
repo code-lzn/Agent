@@ -9,10 +9,11 @@ spring:
 #
 #      # Redis 配置
   rabbitmq:
-    host: localhost
+    host: 106.52.200.236
     port: 5672
-    password: guest
-    username: guest
+    password: 123456
+    username: limou
+    virtual-host: bthost   # 👈 关键！必须和截图里的 bthost 完全一致
 
   data:
     redis:
