@@ -64,42 +64,56 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<Ticket> createTickets(Long orderId, Long scheduleId, List<Seat> seats) {
-        if (orderId == null || scheduleId == null || CollUtil.isEmpty(seats)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数无效");
-        }
-        // 幂等：订单已有票则跳过（普通订单下单时已生成，支付成功/重复调用时不再重复生成）
-        List<Ticket> existingTickets = listByOrder(orderId);
-        if (CollUtil.isNotEmpty(existingTickets)) {
-            log.info("订单 {} 已有 {} 张票，跳过生成", orderId, existingTickets.size());
-            return existingTickets;
-        }
-        // 现有取票码集合（唯一索引 uk_ticketCode 兜底，这里先查重避免批量冲突）
-        Set<String> existing = mapper.selectListByQuery(QueryWrapper.create().select("ticketCode"))
-                .stream().map(Ticket::getTicketCode).collect(Collectors.toSet());
+        log.info("[createTickets] 进入, orderId={}, scheduleId={}, seats.size={}",
+                orderId, scheduleId, seats == null ? 0 : seats.size());
+        try {
+            if (orderId == null || scheduleId == null || CollUtil.isEmpty(seats)) {
+                log.warn("[createTickets] 参数无效, orderId={}, scheduleId={}, seats={}", orderId, scheduleId, seats);
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数无效");
+            }
+            // 幂等：订单已有票则跳过（支付成功/重复调用时不再重复生成）
+            List<Ticket> existingTickets = listByOrder(orderId);
+            if (CollUtil.isNotEmpty(existingTickets)) {
+                log.info("[createTickets] 订单 {} 已有 {} 张票，跳过生成", orderId, existingTickets.size());
+                return existingTickets;
+            }
+            // 现有取票码集合（唯一索引 uk_ticketCode 兜底，这里先查重避免批量冲突）
+            Set<String> existing = mapper.selectListByQuery(QueryWrapper.create().select("ticketCode"))
+                    .stream().map(Ticket::getTicketCode).collect(Collectors.toSet());
+            log.info("[createTickets] 全表现有取票码 {} 个", existing.size());
 
-        List<Ticket> tickets = new ArrayList<>();
-        for (Seat seat : seats) {
-            String code;
-            do {
-                code = generateTicketCode();
-            } while (existing.contains(code));
-            existing.add(code);
+            List<Ticket> tickets = new ArrayList<>();
+            for (Seat seat : seats) {
+                String code;
+                do {
+                    code = generateTicketCode();
+                } while (existing.contains(code));
+                existing.add(code);
 
-            Ticket t = new Ticket();
-            t.setOrderId(orderId);
-            t.setScheduleId(scheduleId);
-            t.setSeatId(seat.getId());
-            t.setSeatLabel(seat.getSeatLabel());
-            t.setTicketCode(code);
-            t.setStatus(TicketStatusEnum.UNUSED.getValue());
-            tickets.add(t);
+                Ticket t = new Ticket();
+                t.setOrderId(orderId);
+                t.setScheduleId(scheduleId);
+                t.setSeatId(seat.getId());
+                t.setSeatLabel(seat.getSeatLabel());
+                t.setTicketCode(code);
+                t.setStatus(TicketStatusEnum.UNUSED.getValue());
+                tickets.add(t);
+                log.info("[createTickets] 待插入: orderId={}, seatId={}, seatLabel={}, code={}",
+                        orderId, seat.getId(), seat.getSeatLabel(), code);
+            }
+            boolean saved = saveBatch(tickets);
+            log.info("[createTickets] saveBatch 结果 saved={}, 条数={}", saved, tickets.size());
+            if (!saved) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "票生成失败");
+            }
+            log.info("[createTickets] 订单 {} 成功生成 {} 张票", orderId, tickets.size());
+            return tickets;
+        } catch (Exception e) {
+            // 即使异常被外层调用方吞掉，也要落盘完整堆栈便于排查
+            log.error("[createTickets] 生成票异常, orderId={}, scheduleId={}, seats.size={}",
+                    orderId, scheduleId, seats == null ? 0 : seats.size(), e);
+            throw e;
         }
-        boolean saved = saveBatch(tickets);
-        if (!saved) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "票生成失败");
-        }
-        log.info("订单 {} 生成 {} 张票", orderId, tickets.size());
-        return tickets;
     }
 
     @Override
