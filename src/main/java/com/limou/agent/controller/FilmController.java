@@ -50,7 +50,9 @@ public class FilmController {
         req.setSortField("rating");
         req.setSortOrder("descend");
         Page<Film> page = filmService.queryFilmPage(req);
-        return ResultUtils.success(page.getRecords());
+        List<Film> records = page.getRecords();
+        filmService.enrichFormatTags(records);
+        return ResultUtils.success(records);
     }
 
     /**
@@ -78,7 +80,9 @@ public class FilmController {
         req.setSortField("rating");
         req.setSortOrder("descend");
         Page<Film> page = filmService.queryFilmPage(req);
-        return ResultUtils.success(page.getRecords());
+        List<Film> records = page.getRecords();
+        filmService.enrichFormatTags(records);
+        return ResultUtils.success(records);
     }
 
     /**
@@ -90,10 +94,11 @@ public class FilmController {
                                             @RequestParam(defaultValue = "10") int pageSize) {
         FilmQueryRequest req = new FilmQueryRequest();
         req.setKeyword(keyword);
-        req.setStatus("published");
+        req.setStatusList(List.of("published", "hot", "upcoming"));
         req.setPageNum(pageNum);
         req.setPageSize(pageSize);
         Page<Film> page = filmService.queryFilmPage(req);
+        filmService.enrichFormatTags(page.getRecords());
         return ResultUtils.success(page);
     }
 
@@ -108,6 +113,7 @@ public class FilmController {
             filmQueryRequest.setStatusList(List.of("published", "hot", "upcoming"));
         }
         Page<Film> filmPage = filmService.queryFilmPage(filmQueryRequest);
+        filmService.enrichFormatTags(filmPage.getRecords());
         return ResultUtils.success(filmPage);
     }
 
@@ -122,6 +128,7 @@ public class FilmController {
         ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
         Film film = filmService.getById(id);
         ThrowUtils.throwIf(film == null, ErrorCode.NOT_FOUND_ERROR, "影片不存在");
+        filmService.enrichFormatTags(List.of(film));
         return ResultUtils.success(film);
     }
 
@@ -170,6 +177,7 @@ public class FilmController {
     @GetMapping("listAll")
     public BaseResponse<List<Film>> listAll() {
         List<Film> list = filmService.list();
+        filmService.enrichFormatTags(list);
         return ResultUtils.success(list);
     }
 
@@ -188,6 +196,9 @@ public class FilmController {
     @GetMapping("getInfo/{id}")
     public BaseResponse<Film> getInfo(@PathVariable Long id) {
         Film film = filmService.getById(id);
+        if (film != null) {
+            filmService.enrichFormatTags(List.of(film));
+        }
         return ResultUtils.success(film);
     }
 

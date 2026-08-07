@@ -115,7 +115,7 @@ public class AlipayController {
                 handlePaymentSuccess(order, trade_no);
             }
 
-            return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
+            return "<script>window.location.replace('" + frontendBaseUrl() + "/payment-success/" + order.getId() + "');</script>";
         } catch (Exception e) {
             log.error("同步回调处理异常: out_trade_no={}", out_trade_no, e);
             return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
