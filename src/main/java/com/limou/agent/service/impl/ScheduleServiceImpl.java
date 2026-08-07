@@ -126,6 +126,12 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         Map<Long, Hall> hallMap = hallService.listByIds(hallIds).stream()
                 .collect(Collectors.toMap(Hall::getId, h -> h, (a, b) -> a));
 
+        // ★ 过滤即将上映(upcoming)影片的场次：未上映影片不提供购票（删按钮后堵住直接访问选座页的旁路）
+        scheduleList.removeIf(s -> {
+            Film film = filmMap.get(s.getFilmId());
+            return film != null && "upcoming".equals(film.getStatus());
+        });
+
         List<ScheduleVO> voList = new ArrayList<>();
         for (Schedule schedule : scheduleList) {
             ScheduleVO vo = new ScheduleVO();
@@ -187,9 +193,10 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long saveScheduleWithSeats(Schedule schedule) {
-        // 0. 校验日期不能为过去 + 影院营业状态
+        // 0. 校验日期不能为过去 + 影院营业状态 + 影片可上映状态
         checkShowDateNotPast(schedule.getShowDate());
         checkCinemaOperable(schedule.getCinemaId());
+        checkFilmPublishable(schedule.getFilmId());
 
         // 1. 保存排期
         boolean saved = super.save(schedule);
@@ -216,13 +223,17 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
             return 0;
         }
 
-        // 0. 校验影院营业状态（去重检查）+ 日期不能为过去，先于保存，快速失败
+        // 0. 校验影院营业状态（去重检查）+ 日期不能为过去 + 影片可上映状态，先于保存，快速失败
         Set<Long> checkedCinemas = new HashSet<>();
+        Set<Long> checkedFilms = new HashSet<>();
         for (Schedule s : scheduleList) {
             if (checkedCinemas.add(s.getCinemaId())) {
                 checkCinemaOperable(s.getCinemaId());
             }
             checkShowDateNotPast(s.getShowDate());
+            if (checkedFilms.add(s.getFilmId())) {
+                checkFilmPublishable(s.getFilmId());
+            }
         }
 
         // 1. 批量保存所有场次，拿到自增 ID（单事务 + 单批 SQL，避免逐条 INSERT 的网络往返）
@@ -273,6 +284,23 @@ public class ScheduleServiceImpl extends ServiceImpl<ScheduleMapper, Schedule> i
         if (!"published".equals(cinema.getStatus())) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR,
                     "影院「" + cinema.getName() + "」当前" + cinemaStatusText(cinema.getStatus()) + "，无法新增场次");
+        }
+    }
+
+    /**
+     * 校验影片可排片：即将上映(upcoming)的影片拒绝新增场次。
+     */
+    private void checkFilmPublishable(Long filmId) {
+        if (filmId == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "影片不能为空");
+        }
+        Film film = filmService.getById(filmId);
+        if (film == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "影片不存在");
+        }
+        if ("upcoming".equals(film.getStatus())) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR,
+                    "影片「" + film.getName() + "」尚未上映，无法排片");
         }
     }
 
