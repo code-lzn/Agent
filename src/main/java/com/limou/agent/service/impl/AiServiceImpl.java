@@ -138,9 +138,9 @@ public class AiServiceImpl implements AiService {
         }
 
         StringBuilder fullResponse = new StringBuilder();
-        // ★ 捕获卡片数据用于持久化（Lambda 内只能引用 effectively-final 变量，用数组做容器）
-        final String[] lastCardType = {null};
-        final String lastCardData[] = {null};
+        // ★ 捕获本回合所有卡片用于持久化（REACT 可能连下多单 → 每单一张卡，全部保存）
+        //   List 容器累积，Lambda 内只做变异、不重新赋值（effectively-final）
+        final List<Map<String, Object>> emittedCards = new ArrayList<>();
 
         return aiCodeGeneratorFactory.doAgentChatStream(
                         message, conversationId, prompt,
@@ -157,8 +157,16 @@ public class AiServiceImpl implements AiService {
                     }
                     if ("card".equals(chunk.type())) {
                         // ★ 工具结果作为卡片事件发送，前端渲染为交互卡片
-                        lastCardType[0] = chunk.cardType();
-                        lastCardData[0] = chunk.cardData();
+                        //   同时累积进 emittedCards，保证多张订单卡在历史中都能恢复
+                        try {
+                            emittedCards.add(Map.of(
+                                    "cardType", chunk.cardType(),
+                                    "data", JSONUtil.parseObj(chunk.cardData())));
+                        } catch (Exception e) {
+                            emittedCards.add(Map.of(
+                                    "cardType", chunk.cardType(),
+                                    "data", Map.of("raw", chunk.cardData())));
+                        }
                         Map<String, Object> cardPayload = new LinkedHashMap<>();
                         cardPayload.put("type", "card");
                         cardPayload.put("cardType", chunk.cardType());
@@ -193,16 +201,10 @@ public class AiServiceImpl implements AiService {
                                     .build());
                 })
                 .doFinally(signal -> {
-                    // ★ 持久化卡片数据：与 graphCore 对齐，卡片也能在历史记录中恢复
-                    Map<String, Object> cardDataMap = null;
-                    if (lastCardType[0] != null && lastCardData[0] != null) {
-                        try {
-                            cardDataMap = new LinkedHashMap<>(JSONUtil.parseObj(lastCardData[0]));
-                        } catch (Exception ignored) { /* 解析失败降级 */ }
-                    }
+                    // ★ 持久化所有卡片：连下多单时每张订单卡都保存，前端历史可聚合展示全部订单
                     saveMovieChatHistory(
                             conversationId, userId, message, fullResponse.toString(),
-                            lastCardType[0], cardDataMap);
+                            emittedCards);
                     movieStateManager.refreshTtl(conversationId);
                     ConversationContext.clear();
                 });
@@ -439,7 +441,7 @@ public class AiServiceImpl implements AiService {
     }
 
     private void saveMovieChatHistory(String conversationId, Long userId, String userMessage, String aiResponse) {
-        saveMovieChatHistory(conversationId, userId, userMessage, aiResponse, null, null);
+        saveMovieChatHistory(conversationId, userId, userMessage, aiResponse, List.of());
     }
 
     private void saveMovieChatHistory(
@@ -449,20 +451,37 @@ public class AiServiceImpl implements AiService {
             String aiResponse,
             String cardType,
             Map<String, Object> cardData) {
+        if (cardType == null || cardData == null) {
+            saveMovieChatHistory(conversationId, userId, userMessage, aiResponse, List.of());
+        } else {
+            saveMovieChatHistory(conversationId, userId, userMessage, aiResponse,
+                    List.of(Map.of("cardType", cardType, "data", cardData)));
+        }
+    }
+
+    /** 持久化对话历史：user 消息 + 若干张卡片（可多张）+ ai 回复，保证连下多单时每张订单卡都能在历史中恢复 */
+    private void saveMovieChatHistory(
+            String conversationId,
+            Long userId,
+            String userMessage,
+            String aiResponse,
+            List<Map<String, Object>> cards) {
         try {
             Long sessionId = Long.valueOf(conversationId);
             chatHistoryService.save(ChatHistory.builder()
                     .sessionId(sessionId).userId(userId)
                     .messageType("user").message(userMessage).build());
 
-            if (cardType != null && cardData != null) {
-                Map<String, Object> cardPayload = new LinkedHashMap<>();
-                cardPayload.put("type", "card");
-                cardPayload.put("cardType", cardType);
-                cardPayload.put("data", cardData);
-                chatHistoryService.save(ChatHistory.builder()
-                        .sessionId(sessionId).userId(userId)
-                        .messageType("card").message(JSONUtil.toJsonStr(cardPayload)).build());
+            if (cards != null) {
+                for (Map<String, Object> card : cards) {
+                    Map<String, Object> cardPayload = new LinkedHashMap<>();
+                    cardPayload.put("type", "card");
+                    cardPayload.put("cardType", card.get("cardType"));
+                    cardPayload.put("data", card.get("data"));
+                    chatHistoryService.save(ChatHistory.builder()
+                            .sessionId(sessionId).userId(userId)
+                            .messageType("card").message(JSONUtil.toJsonStr(cardPayload)).build());
+                }
             }
 
             if (aiResponse != null && !aiResponse.isBlank()) {
