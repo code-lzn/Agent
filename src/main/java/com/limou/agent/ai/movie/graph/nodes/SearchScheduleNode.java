@@ -107,9 +107,19 @@ public class SearchScheduleNode implements GraphNode<MovieGraphState> {
             convState.setHallName(selected.getStr("hallName"));
             convState.setShowDate(selected.getStr("showDate", convState.getShowDate()));
             convState.setStartTime(selected.getStr("startTime", convState.getStartTime()));
+            // 补全 filmId/filmName：解决选场次后 state 里 filmId=null 的问题
+            if (selected.getLong("filmId") != null && convState.getFilmId() == null) {
+                convState.setFilmId(selected.getLong("filmId"));
+            }
+            if (selected.getStr("cinemaId") != null && convState.getCinemaId() == null) {
+                convState.setCinemaId(selected.getLong("cinemaId"));
+            }
+            if (selected.getStr("cinemaName") != null && convState.getCinemaName() == null) {
+                convState.setCinemaName(selected.getStr("cinemaName"));
+            }
             stateManager.saveState(conversationId, convState);
-            log.info("SearchSchedule 写回 scheduleId={}: conversationId={}",
-                    convState.getScheduleId(), conversationId);
+            log.info("SearchSchedule 写回 scheduleId={}, filmId={}: conversationId={}",
+                    convState.getScheduleId(), convState.getFilmId(), conversationId);
         } catch (Exception e) {
             log.warn("SearchSchedule 结果解析失败，跳过场次写回: conversationId={}", conversationId, e);
         }

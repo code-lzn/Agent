@@ -9,6 +9,8 @@ import com.limou.agent.mapper.*;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.*;
 import com.limou.agent.model.enums.OrderStatusEnum;
+import com.limou.agent.mq.OrderTimeoutConfig;
+import com.limou.agent.mq.OrderTimeoutMessage;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -57,6 +59,9 @@ public class CreateOrderTool extends BaseTool {
 
     @Resource
     private ObjectMapper objectMapper;
+
+    @Resource
+    private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
 
     @Tool(description = "基于已锁定的座位创建订单。传入场次ID和已锁定的座位ID数组。返回订单确认JSON，含订单详情和15分钟倒计时")
     @Transactional(rollbackFor = Exception.class)
@@ -150,7 +155,26 @@ public class CreateOrderTool extends BaseTool {
                 seatLabels.add(seat.getSeatLabel());
             }
 
-            // 7. 构建返回结果
+            // 7. 发送延时消息到 RabbitMQ：15 分钟后检查是否已支付
+            try {
+                OrderTimeoutMessage msg = OrderTimeoutMessage.builder()
+                        .orderId(order.getId())
+                        .orderNo(orderNo)
+                        .userId(userId)
+                        .scheduleId(scheduleId)
+                        .createdAt(System.currentTimeMillis())
+                        .build();
+                rabbitTemplate.convertAndSend(
+                        OrderTimeoutConfig.ORDER_TIMEOUT_EXCHANGE,
+                        OrderTimeoutConfig.ORDER_TIMEOUT_ROUTING_KEY,
+                        msg);
+                log.info("订单 {} 超时延时消息已发送", orderNo);
+            } catch (Exception e) {
+                log.error("发送订单超时延时消息失败: orderNo={}", orderNo, e);
+                // 消息发送失败不影响订单创建，兜底由定时任务 OrderTimeoutScheduler 处理
+            }
+
+            // 8. 构建返回结果
             Map<String, Object> result = new HashMap<>();
             result.put("success", true);
             result.put("orderId", order.getId().toString());

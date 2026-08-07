@@ -46,13 +46,15 @@ public class WeixinLoginServiceImpl implements IWeixinLoginService {
             weixinAccessTokenCache.put(weixinProperties.getAppId(), accessToken);
         }
 
-        // 2. 生成 ticket
+        // 2. 生成 ticket（使用唯一 scene_id，防止多个用户同时扫码时 ticket 冲突）
+        // ★ 改用 QR_STR_SCENE + 随机字符串，每个二维码唯一
+        String sceneStr = "login_" + System.currentTimeMillis() + "_" + (int)(Math.random() * 100000);
         WeixinQrCodeReq weixinQrCodeReq = WeixinQrCodeReq.builder()
-                .expire_seconds(2592000)
-                .action_name(WeixinQrCodeReq.ActionNameTypeVO.QR_SCENE.getCode())
+                .expire_seconds(300)  // ★ 5分钟过期（登录二维码应该是临时的）
+                .action_name(WeixinQrCodeReq.ActionNameTypeVO.QR_STR_SCENE.getCode())
                 .action_info(WeixinQrCodeReq.ActionInfo.builder()
                         .scene(WeixinQrCodeReq.ActionInfo.Scene.builder()
-                                .scene_id(100601)
+                                .scene_str(sceneStr)
                                 .build())
                         .build())
                 .build();
@@ -60,6 +62,7 @@ public class WeixinLoginServiceImpl implements IWeixinLoginService {
         Call<WeixinQrCodeRes> call = weixinApiService.createQrCode(accessToken, weixinQrCodeReq);
         WeixinQrCodeRes weixinQrCodeRes = call.execute().body();
         assert null != weixinQrCodeRes;
+        log.info("微信二维码生成成功: ticket={}, sceneStr={}", weixinQrCodeRes.getTicket(), sceneStr);
         return weixinQrCodeRes.getTicket();
     }
 

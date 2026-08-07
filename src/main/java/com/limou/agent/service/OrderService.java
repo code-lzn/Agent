@@ -117,4 +117,9 @@ public interface OrderService extends IService<Order> {
      * @param orders 订单列表（原地修改）
      */
     void fillCheckedStatus(List<Order> orders);
+
+    /**
+     * 查找用户对某影片的已完成/已支付订单ID（用于关联影评）。
+     */
+    Long findCompletedOrderId(Long userId, Long filmId);
 }
