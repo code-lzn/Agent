@@ -134,8 +134,10 @@ public class GeoController {
                     + "&page=" + Math.max(page, 1)
                     + "&output=json"
                     + "&key=" + amapWebServiceKey;
-            if (StrUtil.isNotBlank(city)) {
-                url += "&city=" + URLEncoder.encode(city, StandardCharsets.UTF_8);
+            // ★ 与反查坐标一致：搜索词已含省/市（如"郑州市万达"）→ 不限城市（支持外市影院）；否则限定 city，默认洛阳。
+            if (!keyword.contains("省") && !keyword.contains("市")) {
+                String scopeCity = StrUtil.isNotBlank(city) ? city : "洛阳";
+                url += "&city=" + URLEncoder.encode(scopeCity, StandardCharsets.UTF_8);
             }
             String body = HttpUtil.get(url, 5000);
             JSONObject json = JSONUtil.parseObj(body);
@@ -174,13 +176,21 @@ public class GeoController {
      * 地址反查坐标（B 端手动输入影院地址后获取经纬度）。
      */
     @GetMapping("/geocode")
-    public BaseResponse<Map<String, Object>> geocode(@RequestParam String address) {
+    public BaseResponse<Map<String, Object>> geocode(@RequestParam String address,
+                                                     @RequestParam(required = false) String city) {
         ThrowUtils.throwIf(StrUtil.isBlank(address), ErrorCode.PARAMS_ERROR, "请输入地址");
         try {
             String url = "https://restapi.amap.com/v3/geocode/geo?address="
                     + URLEncoder.encode(address, StandardCharsets.UTF_8)
                     + "&output=json"
                     + "&key=" + amapWebServiceKey;
+            // ★ 反查坐标城市限定：
+            //   地址已含省/市级地名（如"河南省郑州市…"/"郑州市万达"）→ 高德按地址匹配（外市影院也能定位），不再限定城市；
+            //   短地址（如"万达影城泉舜店"）→ 限定城市避免跨城市误匹配，city 优先取表单值，默认洛阳。
+            if (!address.contains("省") && !address.contains("市")) {
+                String scopeCity = StrUtil.isNotBlank(city) ? city : "洛阳";
+                url += "&city=" + URLEncoder.encode(scopeCity, StandardCharsets.UTF_8);
+            }
             String body = HttpUtil.get(url, 5000);
             JSONObject json = JSONUtil.parseObj(body);
             if ("1".equals(json.getStr("status")) && json.getJSONArray("geocodes") != null

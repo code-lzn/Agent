@@ -16,6 +16,7 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 实体类。
@@ -95,6 +96,12 @@ public class Film implements Serializable {
      * 状态: draft/published/offline
      */
     private String status;
+
+    /**
+     * 制式标签（IMAX/杜比/2D等），从排片+影厅汇总，非持久化字段
+     */
+    @Column(ignore = true)
+    private List<String> formatTags;
 
     @Column(value = "isDelete", isLogicDelete = true)
     private Boolean isDelete;
