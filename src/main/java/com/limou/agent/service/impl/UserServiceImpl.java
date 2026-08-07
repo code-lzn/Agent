@@ -11,6 +11,7 @@ import com.limou.agent.model.dto.user.UserQueryRequest;
 import com.limou.agent.model.enums.UserRoleEnum;
 import com.limou.agent.model.vo.LoginUserVO;
 import com.limou.agent.model.vo.UserVO;
+import com.limou.agent.utils.JwtUtils;
 import com.mybatisflex.core.query.QueryWrapper;
 import com.mybatisflex.spring.service.impl.ServiceImpl;
 import com.limou.agent.model.entity.User;
@@ -138,13 +139,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public User getLoginUser(HttpServletRequest request) {
-//        1.先判断是否已经登录
-        User userObj = (User)request.getSession().getAttribute(UserConstant.USER_LOGIN_STATE);
-        if (userObj == null||userObj.getId()==null)
+        // 1. 先尝试从 Session 获取（Cookie 认证，向后兼容）
+        User userObj = (User) request.getSession().getAttribute(UserConstant.USER_LOGIN_STATE);
+        // 2. Session 中没有时，尝试从 JWT Token 注入的 request attribute 获取
+        if (userObj == null || userObj.getId() == null) {
+            userObj = (User) request.getAttribute(UserConstant.USER_LOGIN_STATE);
+        }
+        if (userObj == null || userObj.getId() == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
-        //预防用户修改用户信息之后没有修改缓存，因此要获得最新的数据信息
+        }
+        // 预防用户修改用户信息之后没有修改缓存，因此要获得最新的数据信息
         User user = this.getById(userObj.getId());
-        if(user==null||user.getIsDelete()==1){
+        if (user == null || user.getIsDelete() == 1) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
         return user;
@@ -362,8 +368,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             user.setUserRole(UserRoleEnum.USER.getValue());
             save(user);
         }
+        // PRD 3.3.5：冻结账号禁止登录
+        checkUserFrozen(user);
+        // 保留 Session 认证（向后兼容 Cookie 方案）
         request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, user);
-        return this.getLoginUserVO(user);
+        // ★ 生成 JWT Token，前端存入 localStorage 后通过 Authorization header 携带
+        LoginUserVO vo = this.getLoginUserVO(user);
+        vo.setToken(JwtUtils.createToken(user.getId(), user.getUserRole()));
+        return vo;
     }
 
     /**
