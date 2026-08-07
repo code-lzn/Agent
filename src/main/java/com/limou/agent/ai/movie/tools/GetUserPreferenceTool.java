@@ -2,7 +2,6 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.OrderMapper;
 import com.limou.agent.mapper.UserPreferenceMapper;
 import com.limou.agent.model.entity.Order;

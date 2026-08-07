@@ -88,11 +88,12 @@ public class ChatSessionController {
     }
 
     /**
-     * 获取或创建当前用户的会话（点击 AI 时调用，有则复用）
+     * 获取当前用户的活跃会话（最新一条，无则返回 null）
      */
     @GetMapping("current")
     public BaseResponse<ChatSession> getCurrentSession(@RequestParam Long userId) {
-        return ResultUtils.success(chatSessionService.getOrCreateCurrent(userId));
+        ChatSession session = chatSessionService.getCurrent(userId);
+        return ResultUtils.success(session);
     }
 
     /**

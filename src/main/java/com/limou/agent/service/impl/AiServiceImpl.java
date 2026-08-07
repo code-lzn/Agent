@@ -89,36 +89,6 @@ public class AiServiceImpl implements AiService {
 
     private String movieSystemPromptCache;
 
-    // ==================== 通用 AI 接口 ====================
-
-    @Override
-    public String doChat(String message, String conversationId) {
-        ChatClient chatClient = aiCodeGeneratorFactory.getOrCreateChatClient(Long.valueOf(conversationId));
-        return chatClient.prompt().user(message).call().content();
-    }
-
-    @Override
-    public Flux<String> doChatStream(String message, String conversationId) {
-        ChatClient chatClient = aiCodeGeneratorFactory.getOrCreateChatClient(Long.valueOf(conversationId));
-        return chatClient.prompt().user(message).stream().content();
-    }
-
-    @Override
-    public <T> T doChatStructured(String message, String conversationId, Class<T> outputType) {
-        ChatClient chatClient = aiCodeGeneratorFactory.getOrCreateChatClient(Long.valueOf(conversationId));
-        return chatClient.prompt().user(message).call().entity(outputType);
-    }
-
-    @Override
-    public String doAgentChat(String message, String conversationId) {
-        return aiCodeGeneratorFactory.doAgentChat(message, conversationId);
-    }
-
-    @Override
-    public <T> Optional<T> doAgentChatStructured(String message, String conversationId, Class<T> outputType) {
-        return aiCodeGeneratorFactory.doAgentChatStructured(message, conversationId, outputType);
-    }
-
     // ==================== 电影票 Agent ====================
 
     // ---- GuardRail 辅助 ----
@@ -136,42 +106,6 @@ public class AiServiceImpl implements AiService {
                                 .data("")
                                 .build())
                 .doFinally(signal -> movieStateManager.refreshTtl(conversationId));
-    }
-
-    // ---- ReAct 模式 ----
-
-    @Override
-    public String doMovieChat(String message, String conversationId, Long userId) {
-        log.info("MovieAgent 对话: conversationId={}, userId={}", conversationId, userId);
-
-        // GuardRail（入口层统一校验）
-        GuardRailResult gr = movieGuardRail.check(message);
-        if (!gr.allowed()) {
-            return gr.message();
-        }
-
-        // ReactAgent 全量工具，多轮 ReAct 循环
-        String prompt = getMovieSystemPrompt()
-                + "\n\n## 当前用户\n"
-                + "当前登录用户ID: " + userId + "\n"
-                + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
-        String response = aiCodeGeneratorFactory.doAgentChat(
-                message, conversationId, prompt, movieToolCallbacks, "movie-agent");
-
-        saveMovieChatHistory(conversationId, userId, message, response);
-        movieStateManager.refreshTtl(conversationId);
-        log.info("MovieAgent 响应长度: {}", response != null ? response.length() : 0);
-        return response;
-    }
-
-    @Override
-    public Flux<ServerSentEvent<String>> doMovieChatStream(String message, String conversationId, Long userId) {
-        // GuardRail（入口层统一校验）
-        GuardRailResult gr = movieGuardRail.check(message);
-        if (!gr.allowed()) {
-            return blockedFlux(gr.message(), conversationId);
-        }
-        return reactCore(message, conversationId, userId, null);
     }
 
     /**
@@ -278,16 +212,6 @@ public class AiServiceImpl implements AiService {
 
     /** intent → 中文工具名映射（由 MovieIntent 枚举统一维护） */
     private static final Map<String, String> INTENT_TOOL_NAMES = MovieIntent.toolDisplayNames();
-
-    @Override
-    public Flux<ServerSentEvent<String>> doMovieGraphChatStream(String message, String conversationId, Long userId) {
-        // GuardRail（入口层统一校验）
-        GuardRailResult gr = movieGuardRail.check(message);
-        if (!gr.allowed()) {
-            return blockedFlux(gr.message(), conversationId);
-        }
-        return graphCore(message, conversationId, userId, null);
-    }
 
     /**
      * Graph 核心 —— 无 GuardRail，由调用方保证已校验

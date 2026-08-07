@@ -4,7 +4,6 @@ import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
-import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.HallMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.mapper.ScheduleMapper;
@@ -22,7 +21,6 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 座位图工具

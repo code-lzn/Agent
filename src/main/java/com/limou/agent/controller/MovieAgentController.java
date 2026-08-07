@@ -7,6 +7,7 @@ import com.limou.agent.model.dto.movie.MovieChatRequest;
 import com.limou.agent.ai.movie.MovieStateManager;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.limou.agent.ai.AiCodeGeneratorFactory;
 import com.limou.agent.ai.movie.tools.LockSeatsTool;
 import com.limou.agent.ai.movie.tools.PayOrderTool;
 import com.limou.agent.service.AiService;
@@ -30,6 +31,9 @@ public class MovieAgentController {
     private AiService aiService;
 
     @Resource
+    private AiCodeGeneratorFactory aiCodeGeneratorFactory;
+
+    @Resource
     private MovieStateManager movieStateManager;
 
     @Resource
@@ -38,44 +42,7 @@ public class MovieAgentController {
     @Resource
     private PayOrderTool payOrderTool;
 
-    /**
-     * 电影票 Agent 对话（POST，支持 JSON 请求体）
-     */
-    @PostMapping("/chat")
-    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
-    public String doChat(@RequestBody MovieChatRequest request) {
-        log.info("MovieAgent POST: conversationId={}, userId={}",
-                request.getConversationId(), request.getUserId());
-        return aiService.doMovieChat(
-                request.getMessage(),
-                request.getConversationId(),
-                request.getUserId()
-        );
-    }
 
-    /**
-     * 电影票 Agent 对话（GET，方便测试）
-     */
-//    @GetMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-//    @RateLimit(limitType = RateLimitType.USER, message = "请求过于频繁，请稍后再试", rate = 5, rateInterval = 1)
-//    public String doChatGet(
-//            @RequestParam String message,
-//            @RequestParam String conversationId,
-//            @RequestParam(required = false) Long userId) {
-//        log.info("MovieAgent GET: conversationId={}, userId={}", conversationId, userId);
-//        return aiService.doMovieChat(message, conversationId, userId);
-//    }
-
-    /**
-     * 电影票 Agent 流式对话（SSE）—— ReAct 模式，LLM 自主调用工具
-     */
-    @GetMapping(value = "/chat-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> doChatStream(
-            @RequestParam String message,
-            @RequestParam String conversationId,
-            @RequestParam(required = false) Long userId) {
-        return aiService.doMovieChatStream(message, conversationId, userId);
-    }
 
     /**
      * 电影票 Agent 智能路由流式对话（SSE）
@@ -141,13 +108,15 @@ public class MovieAgentController {
     }
 
     /**
-     * 重置会话（开始新对话）
+     * 重置会话（开始新对话）----没啥应用场景
      */
     @PostMapping("/reset")
     public String resetConversation(@RequestParam String conversationId) {
         movieStateManager.clearState(conversationId);
         lockSeatsTool.releaseStaleLocks(); // 释放过期座位锁
-        aiService.doAgentChat("重置对话", conversationId);
+        // ★ 清除 Caffeine 缓存中的 ChatClient（含旧对话记忆），下次请求会重建
+        aiCodeGeneratorFactory.evictAgentStreamCache(conversationId, "movie-agent");
+        aiCodeGeneratorFactory.evictSimpleChatClientCache(conversationId);
         log.info("MovieAgent 重置: conversationId={}", conversationId);
         return "{\"success\":true,\"message\":\"会话已重置，座位锁已清理\"}";
     }

@@ -317,3 +317,6 @@ ALTER TABLE `review_comment` ADD COLUMN `helpfulCount` int NOT NULL DEFAULT 0 CO
 
 
 ALTER TABLE `review_comment` ADD COLUMN `replyToUserId` bigint DEFAULT NULL COMMENT '实际回复的用户ID' AFTER `parentId`;
+
+use szml;
+delete  from chat_history;

@@ -11,9 +11,9 @@ import com.limou.agent.model.entity.ChatSession;
 public interface ChatSessionService extends IService<ChatSession> {
 
     /**
-     * 获取或创建当前会话（有则复用最新一条，无则新建）
+     * 获取当前会话（最新一条，无则返回 null，不再自动创建）
      */
-    ChatSession getOrCreateCurrent(Long userId);
+    ChatSession getCurrent(Long userId);
 
     /**
      * 强制创建新会话（不复用，始终新建）

@@ -6,7 +6,6 @@ import cn.hutool.json.JSONUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
-import com.limou.agent.ai.tools.BaseTool;
 import com.limou.agent.mapper.CinemaMapper;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
