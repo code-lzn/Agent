@@ -52,6 +52,9 @@ public class MovieToolManager {
     @Resource
     private LocateUserTool locateUserTool;
 
+    @Resource
+    private QueryOrderTool queryOrderTool;
+
     @Autowired(required = false)
     @Qualifier("mcpToolCallbacks")
     private ToolCallbackProvider mcpToolCallbackProvider;
@@ -72,7 +75,8 @@ public class MovieToolManager {
                 payOrderTool,
                 getUserPreferenceTool,
                 searchNearbyCinemasTool,
-                locateUserTool);
+                locateUserTool,
+                queryOrderTool);
 
         ToolCallback[] mcp = mcpToolCallbackProvider != null
                 ? mcpToolCallbackProvider.getToolCallbacks()

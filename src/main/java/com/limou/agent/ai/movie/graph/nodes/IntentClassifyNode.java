@@ -51,6 +51,9 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
                     state.getConversationId(), intentResult.getIntent());
         }
 
+        log.info("IntentClassify 已加载状态: conversationId={}, scheduleId={}, orderId={}, seats={}",
+                state.getConversationId(), convState.getScheduleId(), convState.getOrderId(),
+                convState.getSeatLabels());
         // 写入意图（供条件边路由使用）
         state.setIntent(intentResult.getIntent());
 

@@ -213,11 +213,16 @@ public class ConversationState implements Serializable {
         if (ticketCount != null) {
             sb.append("票数: ").append(ticketCount).append("张\n");
         }
-        if (scheduleId != null && hallName != null) {
-            sb.append("已选场次: ").append(hallName).append("\n");
+        if (scheduleId != null) {
+            sb.append("已选场次ID: ").append(scheduleId);
+            if (hallName != null) sb.append("（").append(hallName).append("）");
+            sb.append("\n");
         }
         if (seatLabels != null && !seatLabels.isEmpty()) {
             sb.append("已选座位: ").append(String.join("、", seatLabels)).append("\n");
+        }
+        if (orderId != null) {
+            sb.append("当前订单ID: ").append(orderId).append("\n");
         }
         if (totalPrice != null) {
             sb.append("总价: ¥").append(totalPrice).append("\n");
