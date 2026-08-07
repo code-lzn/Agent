@@ -1,5 +1,6 @@
 package com.limou.agent.controller;
 
+import com.limou.agent.config.AlipayConfig;
 import com.limou.agent.mq.OrderStatusNotifier;
 import com.limou.agent.model.entity.Order;
 import com.limou.agent.model.entity.OrderSeat;
@@ -56,6 +57,24 @@ public class AlipayController {
     private OrderStatusNotifier orderStatusNotifier;
 
     @Autowired
+    private AlipayConfig alipayConfig;
+
+    /**
+     * 从 YAML 配置 alipay.return_url 中提取前端 base URL，无硬编码。
+     * 例：return_url = http://192.168.13.1:8000/home → 返回 http://192.168.13.1:8000
+     */
+    private String frontendBaseUrl() {
+        String returnUrl = alipayConfig.getReturnUrl();
+        int schemeEnd = returnUrl.indexOf("://");
+        if (schemeEnd < 0) return returnUrl;
+        String afterScheme = returnUrl.substring(schemeEnd + 3);
+        int pathStart = afterScheme.indexOf('/');
+        return pathStart > 0
+                ? returnUrl.substring(0, schemeEnd + 3 + pathStart)
+                : returnUrl;
+    }
+
+    @Autowired
     private TicketService ticketService;
 
     /**
@@ -88,7 +107,7 @@ public class AlipayController {
             QueryWrapper qw = QueryWrapper.create().eq("orderNo", out_trade_no);
             Order order = orderService.getOne(qw);
             if (order == null) {
-                return "<script>window.location.replace('http://192.168.13.1:8000');</script>";
+                return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
             }
 
             // 异步通知可能已经处理过了，避免重复
@@ -96,11 +115,10 @@ public class AlipayController {
                 handlePaymentSuccess(order, trade_no);
             }
 
-            String url = "http://192.168.13.1:8000/payment-success/" + order.getId();
-            return "<script>window.location.replace('" + url + "');</script>";
+            return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
         } catch (Exception e) {
             log.error("同步回调处理异常: out_trade_no={}", out_trade_no, e);
-            return "<script>window.location.replace('http://192.168.13.1:8000');</script>";
+            return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
         }
     }
 
@@ -174,9 +192,6 @@ public class AlipayController {
             List<Seat> seats = seatService.listByIds(seatIds);
             seats.forEach(s -> s.setStatus("sold"));
             seatService.updateBatch(seats);
-
-            // 支付成功才生成票：每座位一张（独立 8 位取票码，可分次核销）；幂等避免异步通知重复生成
-            ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
 
             // 清理 Redis 锁集合
             seatLockService.releaseSeats(order.getScheduleId(), seatIds);

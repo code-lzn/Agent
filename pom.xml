@@ -196,6 +196,25 @@
             <version>1.19.1</version>
         </dependency>
 
+        <!-- ==================== JWT Token 认证 ==================== -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- ==================== 微信登录相关依赖 ==================== -->
         <!-- Retrofit2 HTTP 客户端（调用微信公众号 API） -->
         <dependency>

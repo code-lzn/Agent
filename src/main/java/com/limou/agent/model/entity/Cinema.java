@@ -98,4 +98,10 @@ public class Cinema implements Serializable {
     @Column("updateTime")
     private LocalDateTime updateTime;
 
+    /**
+     * 距离（米），非持久化字段，后端通过高德API计算后填充，与AI选影院结果一致
+     */
+    @Column(ignore = true)
+    private Integer distance;
+
 }

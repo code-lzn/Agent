@@ -51,6 +51,14 @@ public class FilmServiceImpl extends ServiceImpl<FilmMapper, Film> implements Fi
         } else if (StrUtil.isNotBlank(status)) {
             queryWrapper.eq("status", status);
         }
+        // 最低评分筛选
+        if (filmQueryRequest.getMinRating() != null) {
+            queryWrapper.ge("rating", filmQueryRequest.getMinRating());
+        }
+        // 排除指定影片
+        if (filmQueryRequest.getExcludeFilmId() != null) {
+            queryWrapper.ne("id", filmQueryRequest.getExcludeFilmId());
+        }
         // 排序
         queryWrapper.orderBy("createTime", false);
         if (StrUtil.isNotBlank(sortField)) {

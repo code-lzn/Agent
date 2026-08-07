@@ -5,16 +5,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.mapper.HallMapper;
+import com.limou.agent.mapper.OrderMapper;
+import com.limou.agent.mapper.OrderSeatMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.mapper.SeatMapper;
 import com.limou.agent.model.entity.Hall;
+import com.limou.agent.model.entity.Order;
+import com.limou.agent.model.entity.OrderSeat;
 import com.limou.agent.model.entity.Schedule;
 import com.limou.agent.model.entity.Seat;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RedissonClient;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -43,7 +46,10 @@ public class GetSeatMapTool extends BaseTool {
     private ObjectMapper objectMapper;
 
     @Resource
-    private RedissonClient redissonClient;
+    private OrderMapper orderMapper;
+
+    @Resource
+    private OrderSeatMapper orderSeatMapper;
 
     @Resource
     private MovieStateManager stateManager;
@@ -72,21 +78,10 @@ public class GetSeatMapTool extends BaseTool {
                             .orderBy(Seat::getColNum, true)
             );
 
-            // 3. 清理过期锁（Redis 锁已过期但 DB 状态仍为 locked 的脏数据）
-            int released = 0;
-            for (Seat seat : seats) {
-                if ("locked".equals(seat.getStatus())) {
-                    String lockKey = "seat:lock:" + scheduleId + ":" + seat.getId();
-                    if (!redissonClient.getLock(lockKey).isLocked()) {
-                        seat.setStatus("available");
-                        seatMapper.update(Seat.builder()
-                                .id(seat.getId()).status("available").build());
-                        released++;
-                    }
-                }
-            }
+            // 3. 清理孤儿锁（DB 状态为 locked 但没有关联 pending 订单的座位）
+            int released = cleanOrphanLocks(scheduleId, seats);
             if (released > 0) {
-                log.info("getSeatMap 自动释放过期锁: scheduleId={}, count={}", scheduleId, released);
+                log.info("getSeatMap 自动释放孤儿锁: scheduleId={}, count={}", scheduleId, released);
             }
 
             // 4. 构建二维座位矩阵
@@ -194,6 +189,53 @@ public class GetSeatMapTool extends BaseTool {
     @Override
     public String getToolName() {
         return "getSeatMap";
+    }
+
+    /**
+     * 清理孤儿锁：DB status=locked 但未关联任何 pending 订单的座位 → 重置为 available。
+     * 正常的 locked 座位应由 pending 订单持有（订单过期时由定时任务释放），
+     * 这里只兜底清理无主锁（如用户选座后直接关掉页面、浏览器崩溃等场景）。
+     */
+    private int cleanOrphanLocks(Long scheduleId, List<Seat> seats) {
+        List<Seat> lockedSeats = seats.stream()
+                .filter(s -> "locked".equals(s.getStatus()))
+                .collect(Collectors.toList());
+        if (lockedSeats.isEmpty()) {
+            return 0;
+        }
+
+        // 查询本场次所有 pending 订单
+        List<Order> pendingOrders = orderMapper.selectListByQuery(
+                QueryWrapper.create()
+                        .eq("scheduleId", scheduleId)
+                        .eq("status", "pending"));
+        if (pendingOrders.isEmpty()) {
+            // 没有 pending 订单 → 所有 locked 座位都是孤儿锁，全部释放
+            for (Seat seat : lockedSeats) {
+                seat.setStatus("available");
+                seatMapper.update(Seat.builder().id(seat.getId()).status("available").build());
+            }
+            return lockedSeats.size();
+        }
+
+        // 查询 pending 订单关联的座位 ID
+        List<Long> orderIds = pendingOrders.stream().map(Order::getId).collect(Collectors.toList());
+        List<OrderSeat> orderSeats = orderSeatMapper.selectListByQuery(
+                QueryWrapper.create().in("orderId", orderIds));
+        Set<Long> validLockedSeatIds = orderSeats.stream()
+                .map(OrderSeat::getSeatId)
+                .collect(Collectors.toSet());
+
+        // 释放不在任何 pending 订单中的 locked 座位
+        int released = 0;
+        for (Seat seat : lockedSeats) {
+            if (!validLockedSeatIds.contains(seat.getId())) {
+                seat.setStatus("available");
+                seatMapper.update(Seat.builder().id(seat.getId()).status("available").build());
+                released++;
+            }
+        }
+        return released;
     }
 
     @Override
