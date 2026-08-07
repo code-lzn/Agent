@@ -21,6 +21,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import com.limou.agent.utils.GeoUtils;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -249,7 +251,7 @@ public class SearchNearbyCinemasTool extends BaseTool {
             map.put("lng", poi.lng);
             map.put("lat", poi.lat);
             map.put("distanceMeters", poi.distance);
-            map.put("distanceText", formatDistance(poi.distance));
+            map.put("distanceText", GeoUtils.formatDistance(poi.distance));
             map.put("phone", poi.tel);
 
             if (matched != null) {
@@ -297,11 +299,11 @@ public class SearchNearbyCinemasTool extends BaseTool {
             if (cinema.getLongitude() != null && cinema.getLatitude() != null) {
                 double cLng = cinema.getLongitude().doubleValue();
                 double cLat = cinema.getLatitude().doubleValue();
-                int distMeters = haversineDistance(centerLat, centerLng, cLat, cLng);
+                int distMeters = GeoUtils.haversineMetersInt(centerLat, centerLng, cLat, cLng);
                 map.put("lng", cLng);
                 map.put("lat", cLat);
                 map.put("distanceMeters", distMeters);
-                map.put("distanceText", formatDistance(distMeters));
+                map.put("distanceText", GeoUtils.formatDistance(distMeters));
             } else {
                 map.put("distanceText", "未知");
             }
@@ -429,25 +431,6 @@ public class SearchNearbyCinemasTool extends BaseTool {
         } catch (Exception e) {
             log.warn("SearchNearbyCinemas 写回状态失败: convId={}", convId, e);
         }
-    }
-
-    // ==================== 工具方法 ====================
-
-    private String formatDistance(int meters) {
-        if (meters < 1000) return meters + "m";
-        return String.format("%.1fkm", meters / 1000.0);
-    }
-
-    /** Haversine 公式计算两点间距离（米） */
-    private static int haversineDistance(double lat1, double lng1, double lat2, double lng2) {
-        final double R = 6371000; // 地球半径（米）
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLng = Math.toRadians(lng2 - lng1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return (int) Math.round(R * c);
     }
 
     /** Amap POI 数据对象 */

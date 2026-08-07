@@ -71,10 +71,10 @@ public class GeoController {
             log.warn("IP 定位失败: {}", e.getMessage());
         }
 
-        // 3. 兜底（私网IP默认洛阳）
+        // 3. 兜底（私网IP默认洛阳涧西区）
         result.put("city", "洛阳");
-        result.put("lat", 34.62);
-        result.put("lng", 112.45);
+        result.put("lat", 34.66598275858435);
+        result.put("lng", 112.37335681915285);
         return ResultUtils.success(result);
     }
 

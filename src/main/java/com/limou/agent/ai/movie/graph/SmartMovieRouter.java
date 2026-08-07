@@ -42,6 +42,17 @@ public class SmartMovieRouter {
                     + "|街|路|大道|商圈|步行街|小吃街|美食街|万达广场|大悦城|万象城|银泰|来福士|吾悦)");
     private static final Pattern MOVIE_DISCOVERY_PATTERN = Pattern.compile(
             "(推荐|最近|现在|当前).{0,8}(电影|影片|热映|新片)|(热映|新片).{0,8}(哪些|推荐|电影)");
+    /** 用户问"我在哪里""定位"→ REACT，调用 locateUser 工具 */
+    private static final Pattern LOCATE_MYSELF_PATTERN = Pattern.compile(
+            "(我|我人|我当前|我目前|我这边).{0,10}(在|位于|位置|定位|坐标|在.{0,5}哪)"
+                    + "|(定位|位置|坐标|地址).{0,5}(我|在哪|查询|一下)"
+                    + "|(这是|我现在).{0,5}(什么|哪个|哪)");
+    /** "附近有什么"、"周围有好吃的吗"—— 基础定位查询，需要先定位再搜索 */
+    private static final Pattern AROUND_ME_PATTERN = Pattern.compile(
+            "(附近|周边|周围|本地|这里).{0,5}(有|能|可以|什么|哪些|哪里|好玩|好吃)");
+    /** 清晰的定位问题：我在哪  */
+    private static final Pattern DIRECT_LOCATE_PATTERN = Pattern.compile(
+            "我在哪|我的位置|我现在的位置|当前位置|查询位置|定位$|定位我|我在什么地方");
 
     @Resource
     private GraphIntentClassifier intentClassifier;
@@ -125,6 +136,18 @@ public class SmartMovieRouter {
                 && matches(MOVIE_NAME_HINT, message)
                 && (matches(TIME_HINT, message) || matches(CINEMA_HINT, message))) {
             log.info("Router: 规则命中 一句话订票 → REACT");
+            return SmartRouteResult.react();
+        }
+
+        // ★ 用户问"我在哪里"/"定位"/"附近有什么"→ REACT（调用 locateUser 工具）
+        if (matches(DIRECT_LOCATE_PATTERN, message)
+                || (matches(LOCATE_MYSELF_PATTERN, message) && !matches(CINEMA_HINT, message))) {
+            log.info("Router: 规则命中 定位查询 → REACT (locateUser)");
+            return SmartRouteResult.react();
+        }
+        // "附近有什么" — 先定位再搜索，走 REACT 让 LLM 链式调 locateUser + 周边搜索
+        if (matches(AROUND_ME_PATTERN, message) && !matches(CINEMA_HINT, message)) {
+            log.info("Router: 规则命中 周边探索 → REACT (locateUser + around)");
             return SmartRouteResult.react();
         }
 
