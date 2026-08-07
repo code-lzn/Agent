@@ -58,7 +58,9 @@ public class FilmController {
      */
     @GetMapping("/recommended")
     public BaseResponse<List<Film>> recommended(@RequestParam(defaultValue = "4") int limit,
-                                                 @RequestParam(required = false) String type) {
+                                                 @RequestParam(required = false) String type,
+                                                 @RequestParam(required = false) java.math.BigDecimal minRating,
+                                                 @RequestParam(required = false) Long excludeFilmId) {
         FilmQueryRequest req = new FilmQueryRequest();
         // 推荐：正在上映(published) + 热映(hot)
         req.setStatusList(List.of("published", "hot"));
@@ -66,6 +68,12 @@ public class FilmController {
         req.setPageSize(limit);
         if (StrUtil.isNotBlank(type)) {
             req.setType(type);
+        }
+        if (minRating != null) {
+            req.setMinRating(minRating);
+        }
+        if (excludeFilmId != null) {
+            req.setExcludeFilmId(excludeFilmId);
         }
         req.setSortField("rating");
         req.setSortOrder("descend");

@@ -31,11 +31,25 @@ public class FilmReviewServiceImpl extends ServiceImpl<FilmReviewMapper, FilmRev
         if (content == null || content.isBlank()) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "影评内容不能为空");
         }
+
         QueryWrapper qw = QueryWrapper.create()
                 .eq("userId", userId)
                 .eq("filmId", filmId);
         if (this.count(qw) > 0) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "您已评价过该影片");
+        }
+
+        // 查是否有过逻辑删除的旧记录
+        FilmReview existing = this.getMapper().findAnyByUserAndFilm(userId, filmId);
+        if (existing != null) {
+            this.getMapper().reviveReview(existing.getId(), orderId, rating, content, tags);
+            log.info("用户 {} 重新评价影片 {}: rating={}", userId, filmId, rating);
+            existing.setOrderId(orderId);
+            existing.setRating(rating);
+            existing.setContent(content);
+            existing.setTags(tags);
+            existing.setIsDelete(false);
+            return existing;
         }
 
         FilmReview review = FilmReview.builder()
@@ -54,11 +68,19 @@ public class FilmReviewServiceImpl extends ServiceImpl<FilmReviewMapper, FilmRev
     }
 
     @Override
-    public Page<FilmReview> listByFilm(Long filmId, int pageNum, int pageSize) {
-        QueryWrapper qw = QueryWrapper.create()
-                .eq("filmId", filmId)
-                .orderBy("helpfulCount", false)
-                .orderBy("createTime", false);
+    public Page<FilmReview> listByFilm(Long filmId, int pageNum, int pageSize, String sortBy, String filterBy) {
+        QueryWrapper qw = QueryWrapper.create().eq("filmId", filmId);
+
+        if ("latest".equals(sortBy)) {
+            qw.orderBy("createTime", false);
+        } else {
+            qw.orderBy("helpfulCount", false).orderBy("createTime", false);
+        }
+
+        if ("purchasedGood".equals(filterBy)) {
+            qw.ge("rating", 3).isNotNull("orderId");
+        }
+
         return this.page(new Page<>(pageNum, pageSize), qw);
     }
 
