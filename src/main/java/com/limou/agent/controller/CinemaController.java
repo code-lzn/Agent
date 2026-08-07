@@ -24,6 +24,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import com.limou.agent.model.entity.Cinema;
 import com.limou.agent.service.CinemaService;
 import org.springframework.web.bind.annotation.RestController;
+import java.math.BigDecimal;
+import org.springframework.web.bind.annotation.RequestParam;
 import java.util.List;
 
 /**
@@ -123,14 +125,22 @@ public class CinemaController {
     }
 
     /**
-     * 根据主键获取。
+     * 根据主键获取（可选传入用户坐标以通过高德 API 计算距离）。
      *
      * @param id 主键
+     * @param userLat 用户纬度（可选）
+     * @param userLng 用户经度（可选）
      * @return 详情
      */
     @GetMapping("getInfo/{id}")
-    public BaseResponse<Cinema> getInfo(@PathVariable Long id) {
-        return ResultUtils.success(cinemaService.getById(id));
+    public BaseResponse<Cinema> getInfo(@PathVariable Long id,
+                                         @RequestParam(required = false) BigDecimal userLat,
+                                         @RequestParam(required = false) BigDecimal userLng) {
+        Cinema cinema = cinemaService.getById(id);
+        if (cinema != null && userLat != null && userLng != null) {
+            cinemaService.computeAmapDistance(cinema, userLat, userLng);
+        }
+        return ResultUtils.success(cinema);
     }
 
     /**
