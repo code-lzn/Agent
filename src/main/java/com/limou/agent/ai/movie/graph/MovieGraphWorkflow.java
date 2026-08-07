@@ -76,6 +76,9 @@ public class MovieGraphWorkflow {
     @Resource
     private PayOrderTool payOrderTool;
 
+    @Resource
+    private QueryOrderTool queryOrderTool;
+
     /** 编译后的图实例（单例，线程安全——每次 invoke 创建新 state） */
     private CompiledGraph<MovieGraphState> graph;
 
@@ -96,6 +99,7 @@ public class MovieGraphWorkflow {
                 .addNode("lock_seats",      new LockSeatsNode(lockSeatsTool, getSeatMapTool, searchSchedulesTool, movieStateManager))
                 .addNode("create_order",    new CreateOrderNode(createOrderTool, movieStateManager))
                 .addNode("pay_order",       new PayOrderNode(payOrderTool))
+                .addNode("query_order",     new QueryOrderNode(queryOrderTool))
 
                 // ==================== 边 ====================
 
@@ -113,7 +117,8 @@ public class MovieGraphWorkflow {
                                 "get_seat_map",   "get_seat_map",
                                 "lock_seats",     "lock_seats",
                                 "create_order",   "create_order",
-                                "pay_order",      "pay_order"
+                                "pay_order",      "pay_order",
+                                "query_order",    "query_order"
                         ),
                         StateGraph.END  // greeting / chat / unknown → 直接 END
                 )
@@ -131,6 +136,7 @@ public class MovieGraphWorkflow {
                         StateGraph.END)
                 .addEdge("create_order",   StateGraph.END)
                 .addEdge("pay_order",      StateGraph.END)
+                .addEdge("query_order",    StateGraph.END)
 
                 // ==================== 编译 ====================
                 .compile();

@@ -41,10 +41,15 @@ public class GraphIntentClassifier {
             - lock_seats: 用户想锁定座位
             - create_order: 用户想创建订单
             - pay_order: 用户想支付
+            - query_order: 用户想查看/查询订单。如"看看订单""订单详情""我的订单""查一下订单""订单怎么样了""支付成功了吗"
             - get_preference: 用户说"老样子"等
             - greeting: 问候/打招呼
             - chat: 一般对话
             - unknown: 无法识别
+
+            ## 订单查询识别（重要）
+            - 用户已经下过单（对话状态中有 orderId），说"看看订单""订单在哪""帮我查一下订单""我的票"时 → 识别为 query_order
+            - 用户问"支付成功了吗""订单状态" → query_order
 
             ## 意图判断要点（重要）
             - 用户只说影院/地点/场次/日期（如"去洛阳耀莱""看看CGV的场次""明天下午的"）→ **search_cinema / search_schedule**，**不要**推断为购票动作

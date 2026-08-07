@@ -71,7 +71,13 @@ public class SearchFilmsTool extends BaseTool {
                     wrapper.like(Film::getName, keyword);
                 }
                 if (type != null && !type.isBlank()) {
-                    wrapper.like(Film::getType, type);
+                    // ★ 用户常说"动作片""喜剧片"，DB 里存的是"动作""喜剧"
+                    // 逐步去后缀：片/电影/影片/类 → 得到核心类型词
+                    String normalized = type
+                            .replaceAll("(电影|影片|片|类)$", "")
+                            .trim();
+                    log.info("searchFilms type 归一化: '{}' -> '{}'", type, normalized);
+                    wrapper.like(Film::getType, normalized.isEmpty() ? type : normalized);
                 }
                 if ("rating_asc".equals(sort)) {
                     wrapper.orderBy(Film::getRating, true);
