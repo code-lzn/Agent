@@ -14,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 支付宝沙箱支付服务。
@@ -28,6 +30,23 @@ public class AlipayService {
     private AlipayConfig alipayConfig;
 
     private AlipayClient alipayClient;
+
+    /**
+     * 支付表单缓存：避免每次打开支付页都重新调用 pageExecute（RSA 签名开销大）。
+     * 参考 s-pay-mall 的做法：订单创建时生成一次，后续复用。
+     * key = orderNo, value = HTML 表单
+     */
+    private final ConcurrentHashMap<String, CachedForm> payFormCache = new ConcurrentHashMap<>();
+
+    private static class CachedForm {
+        final String form;
+        final long expireAt;
+        CachedForm(String form, long ttlMs) {
+            this.form = form;
+            this.expireAt = System.currentTimeMillis() + ttlMs;
+        }
+        boolean expired() { return System.currentTimeMillis() > expireAt; }
+    }
 
     @PostConstruct
     public void init() {
@@ -45,6 +64,7 @@ public class AlipayService {
 
     /**
      * 创建支付页面（返回自动提交的HTML表单）。
+     * 首次生成后缓存 10 分钟，避免重复 RSA 签名导致页面加载慢。
      *
      * @param orderNo    订单号
      * @param totalAmount 支付金额（元）
@@ -52,6 +72,13 @@ public class AlipayService {
      * @return HTML表单字符串
      */
     public String createPayPage(String orderNo, String totalAmount, String subject) {
+        // 命中缓存直接返回，避免重复签名
+        CachedForm cached = payFormCache.get(orderNo);
+        if (cached != null && !cached.expired()) {
+            log.info("支付宝支付表单命中缓存，订单号: {}", orderNo);
+            return cached.form;
+        }
+
         AlipayTradePagePayRequest request = new AlipayTradePagePayRequest();
         // 异步通知地址
         request.setNotifyUrl(alipayConfig.getNotifyUrl());
@@ -68,6 +95,8 @@ public class AlipayService {
 
         try {
             String form = alipayClient.pageExecute(request).getBody();
+            // 缓存 10 分钟（支付宝订单有效期通常 5-15 分钟）
+            payFormCache.put(orderNo, new CachedForm(form, TimeUnit.MINUTES.toMillis(10)));
             log.info("支付宝支付表单生成成功，订单号: {}", orderNo);
             return form;
         } catch (AlipayApiException e) {
@@ -109,11 +138,15 @@ public class AlipayService {
         request.setBizContent(bizContent.toString());
         try {
             AlipayTradeRefundResponse response = alipayClient.execute(request);
-            if (response.isSuccess() && "10000".equals(response.getCode())) {
+            // ★ 只用 code 判断，不用 isSuccess()。
+            // isSuccess() 会检查 sub_code，沙箱环境经常返回 ACQ.SYSTEM_ERROR 等干扰码，
+            // 导致退款实际已成功但这里误判为失败，重试才能通过。
+            if ("10000".equals(response.getCode())) {
                 log.info("支付宝退款成功，订单号: {}, 退款金额: {}", orderNo, refundAmount);
                 return true;
             } else {
-                log.error("支付宝退款失败，订单号: {}, code: {}, msg: {}", orderNo, response.getCode(), response.getMsg());
+                log.error("支付宝退款失败，订单号: {}, code: {}, msg: {}, sub_code: {}",
+                        orderNo, response.getCode(), response.getMsg(), response.getSubCode());
                 return false;
             }
         } catch (AlipayApiException e) {
