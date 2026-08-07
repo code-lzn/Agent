@@ -115,7 +115,7 @@ public class FileController {
     }
 
     /**
-     * 头像上传（本地存储，无需 COS）
+     * 头像上传（COS 存储）
      */
     @PostMapping("/upload/avatar")
     public BaseResponse<String> uploadAvatar(@RequestPart("file") MultipartFile multipartFile,
@@ -131,22 +131,24 @@ public class FileController {
         if (!Arrays.asList("jpeg", "jpg", "png", "webp", "gif").contains(suffix)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "仅支持 jpg/png/webp/gif 格式");
         }
-        // 保存到项目根目录下的 uploads/avatars
-        String projectDir = System.getProperty("user.dir");
-        File dir = new File(projectDir, "uploads/avatars");
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
         String filename = loginUser.getId() + "_" + System.currentTimeMillis() + "." + suffix;
-        File dest = new File(dir, filename);
+        String filepath = String.format("/user_avatar/%s/%s", loginUser.getId(), filename);
+        File file = null;
         try {
-            multipartFile.transferTo(dest);
+            file = File.createTempFile(filepath, null);
+            multipartFile.transferTo(file);
+            cosManager.uploadFile(filepath, file);
+            return ResultUtils.success(FileConstant.COS_HOST + filepath);
         } catch (Exception e) {
-            log.error("avatar upload error", e);
+            log.error("avatar upload error, filepath = " + filepath, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
+        } finally {
+            if (file != null) {
+                boolean delete = file.delete();
+                if (!delete) {
+                    log.error("file delete error, filepath = {}", filepath);
+                }
+            }
         }
-        // 返回可访问的路径
-        String url = "/uploads/avatars/" + filename;
-        return ResultUtils.success(url);
     }
 }
