@@ -156,9 +156,10 @@ public class SeatLockServiceImpl implements SeatLockService {
             return;
         }
         for (Long seatId : seatIds) {
+            // ★ 同时匹配 locked 和 sold：取消订单时座位是 locked，退款时座位已是 sold
             seatMapper.updateByQuery(
                     Seat.builder().status("available").build(),
-                    QueryWrapper.create().eq("id", seatId).eq("status", "locked"));
+                    QueryWrapper.create().eq("id", seatId).in("status", List.of("locked", "sold")));
         }
         // Redis 锁已在 lockSeats 成功后立即释放，此处无需再释放
     }

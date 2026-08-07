@@ -65,13 +65,14 @@ public class WeixinPortalController {
                        @RequestParam("signature") String signature,
                        @RequestParam("timestamp") String timestamp,
                        @RequestParam("nonce") String nonce,
-                       @RequestParam("openid") String openid,
                        @RequestParam(name = "encrypt_type", required = false) String encType,
                        @RequestParam(name = "msg_signature", required = false) String msgSignature) {
         try {
-            log.info("接收微信公众号信息请求{}开始 {}", openid, requestBody);
+            log.info("接收微信公众号信息请求开始 {}", requestBody);
             // 消息转换
             MessageTextEntity message = XmlUtil.xmlToBean(requestBody, MessageTextEntity.class);
+            // ★ 从 XML 请求体中提取 openid（微信回调的 FromUserName 即用户 openid）
+            String openid = message.getFromUserName();
 
             if ("event".equals(message.getMsgType())) {
                 // SCAN: 已关注用户扫码 → 直接保存登录状态
@@ -88,7 +89,7 @@ public class WeixinPortalController {
 
             return buildMessageTextEntity(openid, "你好，" + message.getContent());
         } catch (Exception e) {
-            log.error("接收微信公众号信息请求{}失败 {}", openid, requestBody, e);
+            log.error("接收微信公众号信息请求失败 {}", requestBody, e);
             return "";
         }
     }

@@ -3,7 +3,11 @@ package com.limou.agent.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import com.limou.agent.exception.BusinessException;
 import com.limou.agent.exception.ErrorCode;
+import com.limou.agent.mapper.OrderMapper;
+import com.limou.agent.mapper.OrderSeatMapper;
 import com.limou.agent.model.entity.Hall;
+import com.limou.agent.model.entity.Order;
+import com.limou.agent.model.entity.OrderSeat;
 import com.limou.agent.model.entity.Schedule;
 import com.limou.agent.model.vo.SeatMapVO;
 import com.mybatisflex.core.query.QueryWrapper;
@@ -14,10 +18,8 @@ import com.limou.agent.service.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 座位 服务层实现。
@@ -32,6 +34,12 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements Se
 
     @Autowired
     private HallService hallService;
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @Autowired
+    private OrderSeatMapper orderSeatMapper;
 
     @Override
     public SeatMapVO getSeatMap(Long scheduleId) {
@@ -58,6 +66,9 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements Se
                 .orderBy("rowNum", true)
                 .orderBy("colNum", true);
         List<Seat> seats = mapper.selectListByQuery(queryWrapper);
+
+        // 3.5 兜底清理孤儿锁（locked 但无关联 pending 订单的座位）
+        cleanOrphanLocks(scheduleId, seats);
 
         // 4. 组装
         SeatMapVO vo = new SeatMapVO();
@@ -110,5 +121,47 @@ public class SeatServiceImpl extends ServiceImpl<SeatMapper, Seat> implements Se
         }
 
         return vo;
+    }
+
+    /**
+     * 兜底清理孤儿锁：DB status=locked 但未关联任何 pending 订单的座位 → 重置为 available。
+     * 正常的 locked 座位由 pending 订单持有，订单超时时由定时任务释放；
+     * 这里只清理无主锁（用户选座后直接关页面、浏览器崩溃等异常场景）。
+     */
+    private void cleanOrphanLocks(Long scheduleId, List<Seat> seats) {
+        List<Seat> lockedSeats = seats.stream()
+                .filter(s -> "locked".equals(s.getStatus()))
+                .collect(Collectors.toList());
+        if (lockedSeats.isEmpty()) {
+            return;
+        }
+
+        // 查询本场次所有 pending 订单
+        List<Order> pendingOrders = orderMapper.selectListByQuery(
+                QueryWrapper.create()
+                        .eq("scheduleId", scheduleId)
+                        .eq("status", "pending"));
+        if (pendingOrders.isEmpty()) {
+            for (Seat seat : lockedSeats) {
+                seat.setStatus("available");
+                mapper.update(Seat.builder().id(seat.getId()).status("available").build());
+            }
+            return;
+        }
+
+        // 查询 pending 订单关联的座位 ID
+        List<Long> orderIds = pendingOrders.stream().map(Order::getId).collect(Collectors.toList());
+        List<OrderSeat> orderSeats = orderSeatMapper.selectListByQuery(
+                QueryWrapper.create().in("orderId", orderIds));
+        Set<Long> validLockedSeatIds = orderSeats.stream()
+                .map(OrderSeat::getSeatId)
+                .collect(Collectors.toSet());
+
+        for (Seat seat : lockedSeats) {
+            if (!validLockedSeatIds.contains(seat.getId())) {
+                seat.setStatus("available");
+                mapper.update(Seat.builder().id(seat.getId()).status("available").build());
+            }
+        }
     }
 }

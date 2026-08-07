@@ -662,9 +662,51 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public int releaseOrphanLocks() {
-        // 查找被锁定但没有关联订单的座位（超过30分钟前的锁定）
-        // 简化实现：直接通过定时任务处理
-        return 0;
+        // 查找所有 locked 状态的座位
+        List<Seat> lockedSeats = seatService.list(
+                QueryWrapper.create().eq("status", "locked"));
+        if (CollUtil.isEmpty(lockedSeats)) {
+            return 0;
+        }
+
+        // 按场次分组处理
+        Map<Long, List<Seat>> bySchedule = lockedSeats.stream()
+                .collect(Collectors.groupingBy(Seat::getScheduleId));
+
+        int released = 0;
+        for (Map.Entry<Long, List<Seat>> entry : bySchedule.entrySet()) {
+            Long scheduleId = entry.getKey();
+            List<Seat> seats = entry.getValue();
+
+            // 查该场次的 pending 订单
+            List<Order> pendingOrders = this.list(
+                    QueryWrapper.create()
+                            .eq("scheduleId", scheduleId)
+                            .eq("status", OrderStatusEnum.PENDING.getValue()));
+
+            Set<Long> validSeatIds = Collections.emptySet();
+            if (CollUtil.isNotEmpty(pendingOrders)) {
+                List<Long> orderIds = pendingOrders.stream()
+                        .map(Order::getId).collect(Collectors.toList());
+                List<OrderSeat> orderSeats = orderSeatService.list(
+                        QueryWrapper.create().in("orderId", orderIds));
+                validSeatIds = orderSeats.stream()
+                        .map(OrderSeat::getSeatId).collect(Collectors.toSet());
+            }
+
+            for (Seat seat : seats) {
+                if (!validSeatIds.contains(seat.getId())) {
+                    seatLockService.releaseSeatsToAvailable(scheduleId,
+                            Collections.singletonList(seat.getId()));
+                    released++;
+                }
+            }
+        }
+
+        if (released > 0) {
+            log.info("releaseOrphanLocks 释放 {} 个孤儿锁座位", released);
+        }
+        return released;
     }
 
     /**

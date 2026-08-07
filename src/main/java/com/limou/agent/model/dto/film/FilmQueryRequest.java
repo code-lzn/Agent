@@ -37,6 +37,16 @@ public class FilmQueryRequest extends PageRequest implements Serializable {
      */
     private List<String> statusList;
 
+    /**
+     * 最低评分筛选（>=）
+     */
+    private java.math.BigDecimal minRating;
+
+    /**
+     * 排除的影片ID
+     */
+    private Long excludeFilmId;
+
     @Serial
     private static final long serialVersionUID = 1L;
 }

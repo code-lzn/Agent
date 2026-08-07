@@ -8,7 +8,7 @@ public interface FilmReviewService extends IService<FilmReview> {
 
     FilmReview createReview(Long userId, Long filmId, Long orderId, Integer rating, String content, String tags);
 
-    Page<FilmReview> listByFilm(Long filmId, int pageNum, int pageSize);
+    Page<FilmReview> listByFilm(Long filmId, int pageNum, int pageSize, String sortBy, String filterBy);
 
     /** @return true=已标记有用, false=已取消 */
     boolean markHelpful(Long reviewId, Long userId);
