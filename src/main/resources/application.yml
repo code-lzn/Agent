@@ -134,7 +134,7 @@ alipay:
   # 服务器异步通知页面路径 - natapp 内网穿透
   notify_url: http://lbljh.nat100.top/api/payment/alipay/notify
   # 页面跳转同步通知页面路径
-  return_url: http://192.168.13.1:8123/api/payment/alipay/return
+  return_url:  http://192.168.13.1:8002/api/payment/alipay/return
   # 沙箱网关地址
   gatewayUrl: https://openapi-sandbox.dl.alipaydev.com/gateway.do
   sign_type: RSA2
