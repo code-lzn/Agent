@@ -1,6 +1,5 @@
 package com.limou.agent.service.impl;
 
-
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
@@ -189,7 +188,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     .hallName(hall != null ? hall.getName() : null)
                     .totalPrice(totalPrice)
                     .count(count)
-                    .status("pending")
+                    .status(OrderStatusEnum.PENDING.getValue())
                     .expireAt(LocalDateTime.now().plusMinutes(getLockDuration()))
                     .build();
             this.save(order);
@@ -503,13 +502,14 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
         // 核销拦截：有任一票已核销使用 → 整单禁止退款
         if (ticketService.hasUsedTicket(orderId)) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "有票已核销使用，无法退款");
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "已核销，无法退票");
         }
+
+        // 已过期拦截：状态为 expired 或放映已结束
         if ("expired".equals(order.getStatus())) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已结束，无法退票");
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单已过期，无法退票");
         }
         try {
-            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             Schedule schedule = scheduleService.getById(order.getScheduleId());
             if (schedule != null && schedule.getEndTime() != null && schedule.getShowDate() != null) {
                 LocalDateTime endTime = LocalDateTime.of(
@@ -527,9 +527,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         // 时间维度拦截：已开场 / 开场前1分钟内
         try {
-            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]");
+//            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm[:ss]");
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             LocalDateTime showTime = LocalDateTime.parse(order.getScheduleTime(), fmt);
             long diffSeconds = java.time.Duration.between(LocalDateTime.now(), showTime).getSeconds();
+            if (diffSeconds <= 0) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "电影已开场，无法退票");
+            }
             if (diffSeconds < 60) {
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "开场前1分钟内不支持退票");
             }
@@ -753,5 +757,32 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
         }
         return vo;
+    }
+
+    @Override
+    public Long findCompletedOrderId(Long userId, Long filmId) {
+        if (userId == null || filmId == null) {
+            return null;
+        }
+        // 查出该影片的所有场次ID
+        List<Long> scheduleIds = scheduleService.list(
+                        QueryWrapper.create().eq("filmId", filmId))
+                .stream()
+                .map(Schedule::getId)
+                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(scheduleIds)) {
+            return null;
+        }
+        // 找用户对这些场次的已支付/已完成订单，取最新一条
+        Order order = this.getOne(
+                QueryWrapper.create()
+                        .eq("userId", userId)
+                        .in("scheduleId", scheduleIds)
+                        .in("status", java.util.List.of(
+                                OrderStatusEnum.PAID.getValue(),
+                                OrderStatusEnum.COMPLETED.getValue()))
+                        .orderBy("paidAt", false)
+                        .limit(1));
+        return order != null ? order.getId() : null;
     }
 }

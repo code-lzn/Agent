@@ -73,9 +73,17 @@ public class WeixinPortalController {
             // 消息转换
             MessageTextEntity message = XmlUtil.xmlToBean(requestBody, MessageTextEntity.class);
 
-            if ("event".equals(message.getMsgType()) && "SCAN".equals(message.getEvent())) {
-                weixinLoginService.saveLoginState(message.getTicket(), openid);
-                return buildMessageTextEntity(openid, "登录成功");
+            if ("event".equals(message.getMsgType())) {
+                // SCAN: 已关注用户扫码 → 直接保存登录状态
+                // subscribe: 未关注用户扫码关注 → 也需要保存登录状态
+                if ("SCAN".equals(message.getEvent()) || "subscribe".equals(message.getEvent())) {
+                    String ticket = message.getTicket();
+                    if (ticket != null && !ticket.isEmpty()) {
+                        weixinLoginService.saveLoginState(ticket, openid);
+                        log.info("微信扫码登录成功: openid={}, event={}", openid, message.getEvent());
+                        return buildMessageTextEntity(openid, "登录成功！");
+                    }
+                }
             }
 
             return buildMessageTextEntity(openid, "你好，" + message.getContent());
