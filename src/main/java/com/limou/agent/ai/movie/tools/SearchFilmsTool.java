@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
 import com.limou.agent.mapper.FilmMapper;
+import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.Film;
+import com.limou.agent.model.entity.Schedule;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -14,12 +16,12 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
-import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -32,6 +34,9 @@ public class SearchFilmsTool extends BaseTool {
 
     @Resource
     private FilmMapper filmMapper;
+
+    @Resource
+    private ScheduleMapper scheduleMapper;
 
     @Resource
     private ObjectMapper objectMapper;
@@ -51,15 +56,13 @@ public class SearchFilmsTool extends BaseTool {
                     && (type == null || type.isBlank());
 
             if (isRecommendation) {
-                // ★ 推荐场景（无关键词/类型）：从可上映影片中随机挑 3-5 部，避免每次固定同一批高分片
+                // ★ 推荐场景（无关键词/类型）：按评分排序取全部，后续由排片过滤精选
                 List<Film> all = filmMapper.selectListByQuery(
                         QueryWrapper.create()
                                 // 可上映影片：热映 hot + 正在上映 published 都可推荐（草稿/下线不展示）
                                 .in(Film::getStatus, List.of("hot", "published")));
-                Collections.shuffle(all);
-                int randomCount = 3 + new Random().nextInt(3); // 3 ~ 5 随机
+                // 按评分降序排列，不随机——保证每次推荐结果一致
                 films = all.stream()
-                        .limit(randomCount)
                         .sorted(Comparator.comparing(Film::getRating,
                                 Comparator.nullsLast(Comparator.reverseOrder())))
                         .collect(Collectors.toList());
@@ -86,6 +89,36 @@ public class SearchFilmsTool extends BaseTool {
                 }
                 wrapper.limit(5);
                 films = filmMapper.selectListByQuery(wrapper);
+            }
+
+            // ★ 过滤：只保留有近期排片（今天 ~ 7天内）的影片，避免推荐排片全在未来半个月的
+            if (!films.isEmpty()) {
+                List<Long> filmIds = films.stream().map(Film::getId).collect(Collectors.toList());
+                try {
+                    java.time.LocalDate today = java.time.LocalDate.now();
+                    Date todayDate = java.sql.Date.valueOf(today);
+                    Date weekLater = java.sql.Date.valueOf(today.plusDays(7));
+                    List<Schedule> schedules = scheduleMapper.selectListByQuery(
+                            QueryWrapper.create()
+                                    .in(Schedule::getFilmId, filmIds)
+                                    .ge(Schedule::getShowDate, todayDate)
+                                    .le(Schedule::getShowDate, weekLater));
+                    Set<Long> filmIdsWithSchedule = schedules.stream()
+                            .map(Schedule::getFilmId)
+                            .collect(Collectors.toSet());
+                    int before = films.size();
+                    films = films.stream()
+                            .filter(f -> filmIdsWithSchedule.contains(f.getId()))
+                            .collect(Collectors.toList());
+                    log.info("searchFilms 排片过滤(7天内): {}部 → {}部", before, films.size());
+                } catch (Exception e) {
+                    log.warn("searchFilms 排片过滤失败，返回全部结果: {}", e.getMessage());
+                }
+            }
+
+            // ★ 去重后限制最多5部（推荐场景取全部后需要截断）
+            if (isRecommendation && films.size() > 5) {
+                films = films.subList(0, 5);
             }
 
             List<Map<String, Object>> filmList = films.stream().map(f -> {
