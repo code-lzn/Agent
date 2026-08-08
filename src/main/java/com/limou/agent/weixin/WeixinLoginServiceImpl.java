@@ -7,12 +7,14 @@ import com.limou.agent.weixin.model.WeixinTemplateMessageVO;
 import com.limou.agent.weixin.model.WeixinTokenRes;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import retrofit2.Call;
 
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 微信登录服务实现
@@ -32,6 +34,12 @@ public class WeixinLoginServiceImpl implements IWeixinLoginService {
 
     @Resource
     private IWeixinApiService weixinApiService;
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    private static final String TICKET_REDIS_PREFIX = "weixin:ticket:";
+    private static final long TICKET_REDIS_TTL_MINUTES = 5;
 
     @Override
     public String createQrCodeTicket() throws Exception {
@@ -68,12 +76,35 @@ public class WeixinLoginServiceImpl implements IWeixinLoginService {
 
     @Override
     public String checkLogin(String ticket) {
-        return openidTokenCache.getIfPresent(ticket);
+        // 优先查本地 Caffeine 缓存
+        String openid = openidTokenCache.getIfPresent(ticket);
+        if (openid != null) {
+            return openid;
+        }
+        // ★ 回退查 Redis（NAT隧道/多实例场景）
+        try {
+            openid = stringRedisTemplate.opsForValue().get(TICKET_REDIS_PREFIX + ticket);
+        } catch (Exception e) {
+            log.warn("Redis 查询 ticket→openid 失败: {}", e.getMessage());
+        }
+        // Redis 命中时，回写到本地缓存
+        if (openid != null) {
+            openidTokenCache.put(ticket, openid);
+        }
+        return openid;
     }
 
     @Override
     public void saveLoginState(String ticket, String openid) throws IOException {
         openidTokenCache.put(ticket, openid);
+        // ★ 同时写入 Redis，解决多实例/NAT隧道场景下缓存不共享的问题
+        try {
+            stringRedisTemplate.opsForValue().set(
+                TICKET_REDIS_PREFIX + ticket, openid,
+                TICKET_REDIS_TTL_MINUTES, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("Redis 写入 ticket→openid 失败（不影响本地缓存）: {}", e.getMessage());
+        }
 
         // 1. 获取 accessToken
         String accessToken = weixinAccessTokenCache.getIfPresent(weixinProperties.getAppId());
