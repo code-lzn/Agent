@@ -1,5 +1,6 @@
 package com.limou.agent.ai.movie.tools;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
@@ -10,6 +11,7 @@ import com.limou.agent.model.entity.*;
 import com.limou.agent.model.enums.OrderStatusEnum;
 import com.limou.agent.mq.OrderTimeoutConfig;
 import com.limou.agent.mq.OrderTimeoutMessage;
+import com.limou.agent.service.SystemConfigService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +62,9 @@ public class CreateOrderTool extends BaseTool {
 
     @Resource
     private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
+
+    @Resource
+    private SystemConfigService systemConfigService;
 
     @Tool(description = "基于已锁定的座位创建订单。传入场次ID和已锁定的座位ID数组。返回订单确认JSON，含订单详情和15分钟倒计时")
     @Transactional(rollbackFor = Exception.class)
@@ -120,7 +125,8 @@ public class CreateOrderTool extends BaseTool {
 
             // 5. 创建订单
             LocalDateTime now = LocalDateTime.now();
-            LocalDateTime expireAt = now.plusMinutes(15);
+            int lockDuration = getLockDuration();
+            LocalDateTime expireAt = now.plusMinutes(lockDuration);
 
             Order order = Order.builder()
                     .orderNo(orderNo)
@@ -187,7 +193,7 @@ public class CreateOrderTool extends BaseTool {
             result.put("count", seatIds.size());
             result.put("totalPrice", totalPrice);
             result.put("expireAt", expireAt.toString());
-            result.put("remainingMinutes", 15);
+            result.put("remainingMinutes", lockDuration);
             result.put("message", "为您确认：" + order.getFilmName() + "×" + seatIds.size()
                     + "张，" + String.join("、", seatLabels)
                     + "，共 ¥" + totalPrice + "。没问题就下单啦～");
@@ -229,5 +235,24 @@ public class CreateOrderTool extends BaseTool {
     public String generateToolExecutedResult(JSONObject arguments) {
         Long scheduleId = arguments.getLong("scheduleId");
         return String.format("[工具调用] 创建订单 scheduleId=%d", scheduleId);
+    }
+
+    private int getLockDuration() {
+        return readIntConfig("lockDuration", 15);
+    }
+
+    private int readIntConfig(String configKey, int defaultValue) {
+        try {
+            SystemConfig config = systemConfigService.getOne(
+                    QueryWrapper.create().eq("configKey", configKey));
+            if (config == null || StrUtil.isBlank(config.getConfigValue())) {
+                return defaultValue;
+            }
+            String v = config.getConfigValue().trim().replaceAll("[\"']", "");
+            return Integer.parseInt(v);
+        } catch (Exception e) {
+            log.warn("读取配置 {} 失败，使用默认 {}", configKey, defaultValue, e);
+            return defaultValue;
+        }
     }
 }
