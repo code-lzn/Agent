@@ -301,8 +301,20 @@ public class AiServiceImpl implements AiService {
 
         Flux<ServerSentEvent<String>> responseStream;
 
-        // 前置事件流（卡片 > tool_start）
-        Flux<ServerSentEvent<String>> prefixEvents = Flux.empty();
+        // ★ 前置 thinking 事件：与 reactCore 一致，告知用户正在分析
+        Flux<ServerSentEvent<String>> prefixEvents = Flux.just(
+                ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of(
+                                "d", "正在分析您的需求...",
+                                "type", "status")))
+                        .build(),
+                ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of(
+                                "d", "正在分析您的需求...",
+                                "type", "tool_start",
+                                "toolName", "意图识别")))
+                        .build()
+        );
 
         if (hasCard) {
             // 卡片事件：前端渲染为可视化卡片
