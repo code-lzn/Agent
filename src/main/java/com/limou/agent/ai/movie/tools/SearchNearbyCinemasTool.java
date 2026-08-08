@@ -23,6 +23,8 @@ import org.springframework.web.client.RestTemplate;
 
 import com.limou.agent.utils.GeoUtils;
 
+import java.util.Comparator;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -90,18 +92,10 @@ public class SearchNearbyCinemasTool extends BaseTool {
 
             // ========== Step 2: POI 周边搜索 — 搜索附近电影院 ==========
             List<AmapPoi> amapPois = searchAroundCinemas(resultLng, resultLat, r);
-            if (amapPois.isEmpty()) {
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("cinemas", List.of());
-                result.put("total", 0);
-                result.put("center", location);
-                result.put("radius", r);
-                result.put("message", "在「" + location + "」附近" + (r / 1000) + "公里内未找到影院，可以试试扩大搜索范围");
-                return objectMapper.writeValueAsString(result);
-            }
 
             // ========== Step 3: 与系统影院数据库匹配 ==========
-            List<Map<String, Object>> matchedList = matchWithDatabase(amapPois, filmId, resultLng, resultLat);
+            // ★ 即使 Amap 返回空，仍执行 matchWithDatabase：DB 中有坐标的影院可补充
+            List<Map<String, Object>> matchedList = matchWithDatabase(amapPois, filmId, resultLng, resultLat, r);
 
             // ========== Step 4: 写回 ConversationState ==========
             writeBackToState(matchedList);
@@ -114,6 +108,10 @@ public class SearchNearbyCinemasTool extends BaseTool {
             result.put("centerLng", resultLng);
             result.put("centerLat", resultLat);
             result.put("radius", r);
+            if (matchedList.isEmpty()) {
+                result.put("message", "在「" + location + "」附近" + (r / 1000)
+                        + "公里内未找到影院，可以试试扩大搜索范围或换个地点");
+            }
 
             log.info("searchNearbyCinemas: location={}, radius={}, amapPois={}, matched={}",
                     location, r, amapPois.size(), matchedList.size());
@@ -217,7 +215,7 @@ public class SearchNearbyCinemasTool extends BaseTool {
     // ==================== 数据库匹配 ====================
 
     private List<Map<String, Object>> matchWithDatabase(
-            List<AmapPoi> amapPois, Long filmId, double centerLng, double centerLat) {
+            List<AmapPoi> amapPois, Long filmId, double centerLng, double centerLat, int radius) {
 
         // 加载所有已发布影院
         List<Cinema> allCinemas = cinemaMapper.selectListByQuery(
@@ -275,17 +273,22 @@ public class SearchNearbyCinemasTool extends BaseTool {
             result.add(map);
         }
 
-        // 补充：DB 中有但 Amap 没匹配上的附近影院（同一行政区）
+        // 补充：DB 中有但 Amap 没匹配上的附近影院（按距离过滤）
+        // ★ Amap 数据可能滞后，DB 中有坐标的影院通过距离判断是否在附近
+        int maxSupplementDist = Math.max(radius, 10000); // 补充上限：取 radius 和 10km 的较大值
         for (Cinema cinema : allCinemas) {
             if (matchedDbIds.contains(cinema.getId())) continue;
-            // 只有同一城市的影院才作为补充
-            boolean sameCity = amapPois.stream().anyMatch(p ->
-                    p.city != null && p.city.contains(cinema.getCity() != null ? cinema.getCity() : ""));
-            if (!sameCity) continue;
+
+            // ★ 用距离替代城市匹配：只纳入真正在附近的影院
+            if (cinema.getLongitude() == null || cinema.getLatitude() == null) continue;
+            double cLng = cinema.getLongitude().doubleValue();
+            double cLat = cinema.getLatitude().doubleValue();
+            int distMeters = GeoUtils.haversineMetersInt(centerLat, centerLng, cLat, cLng);
+            if (distMeters > maxSupplementDist) continue; // 超出补充范围，跳过
 
             Map<String, Object> map = new LinkedHashMap<>();
             map.put("amapName", cinema.getName());
-            map.put("name", cinema.getName());               // ★ 前端兼容字段
+            map.put("name", cinema.getName());
             map.put("address", cinema.getAddress());
             map.put("city", cinema.getCity());
             map.put("matched", true);
@@ -294,24 +297,19 @@ public class SearchNearbyCinemasTool extends BaseTool {
             map.put("dbAddress", cinema.getAddress());
             map.put("tags", cinema.getTags());
             map.put("basePrice", cinema.getBasePrice());
-
-            // ★ 利用 DB 中影院的经纬度计算距离
-            if (cinema.getLongitude() != null && cinema.getLatitude() != null) {
-                double cLng = cinema.getLongitude().doubleValue();
-                double cLat = cinema.getLatitude().doubleValue();
-                int distMeters = GeoUtils.haversineMetersInt(centerLat, centerLng, cLat, cLng);
-                map.put("lng", cLng);
-                map.put("lat", cLat);
-                map.put("distanceMeters", distMeters);
-                map.put("distanceText", GeoUtils.formatDistance(distMeters));
-            } else {
-                map.put("distanceText", "未知");
-            }
+            map.put("lng", cLng);
+            map.put("lat", cLat);
+            map.put("distanceMeters", distMeters);
+            map.put("distanceText", GeoUtils.formatDistance(distMeters));
 
             boolean hasSchedule = filmId == null || scheduledCinemaIds.contains(cinema.getId());
             map.put("hasSchedule", hasSchedule);
             result.add(map);
         }
+
+        // ★ 按距离从近到远排序
+        result.sort(Comparator.comparingInt(m ->
+                ((Number) m.getOrDefault("distanceMeters", Integer.MAX_VALUE)).intValue()));
 
         return result;
     }

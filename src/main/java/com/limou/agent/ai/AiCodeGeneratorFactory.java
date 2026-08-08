@@ -5,11 +5,13 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 
 import com.limou.agent.ai.movie.EventEmittingToolCallback;
 import com.limou.agent.rag.DocumentRagService;
+import com.limou.agent.rag.FilmRagService;
 import com.limou.agent.service.ChatHistoryService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
@@ -35,6 +37,8 @@ public class AiCodeGeneratorFactory {
     private ChatHistoryService chatHistoryService;
     @Resource
     private DocumentRagService documentRagService;
+    @Resource
+    private FilmRagService filmRagService;
 
     /** doSimpleChatStream ChatClient 缓存 —— 按 conversationId，带对话记忆 + RAG */
     private final Cache<String, ChatClient> simpleChatClientCache = Caffeine.newBuilder()
@@ -134,6 +138,28 @@ public class AiCodeGeneratorFactory {
         return map;
     }
 
+    /**
+     * 组装 defaultAdvisors：对话记忆 + md 知识库 RAG + 影片 RAG（topK 3 抑制无关上下文）。
+     * 影片 advisor 常开：电影 Agent 场景下注入影片信息供 LLM 检索引用。
+     */
+    private Advisor[] buildAdvisors(MessageWindowChatMemory chatMemory) {
+        var advisors = new java.util.ArrayList<Advisor>();
+        if (documentRagService.getVectorStore() != null) {
+            advisors.add(QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build());
+        }
+        if (filmRagService.getVectorStore() != null) {
+            // 影片检索 topK=3：只取最相关的几部影片注入，抑制无关上下文
+            advisors.add(QuestionAnswerAdvisor.builder(filmRagService.getVectorStore())
+                    .searchRequest(org.springframework.ai.vectorstore.SearchRequest.builder()
+                            .query("电影")
+                            .topK(3)
+                            .build())
+                    .build());
+        }
+        advisors.add(MessageChatMemoryAdvisor.builder(chatMemory).build());
+        return advisors.toArray(new Advisor[0]);
+    }
+
     /** 构建流式 Agent 基础 ChatClient —— 对话记忆 + RAG，不含 systemPrompt 和 tools */
     private ChatClient buildBaseStreamChatClient(String conversationId) {
         MessageWindowChatMemory chatMemory = MessageWindowChatMemory.builder()
@@ -142,9 +168,7 @@ public class AiCodeGeneratorFactory {
                 .build();
         chatHistoryService.loadChatHistory(Long.valueOf(conversationId), chatMemory, 20);
         return ChatClient.builder(chatModel)
-                .defaultAdvisors(
-                        QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build(),
-                        MessageChatMemoryAdvisor.builder(chatMemory).build())
+                .defaultAdvisors(buildAdvisors(chatMemory))
                 .build();
     }
 
@@ -161,9 +185,7 @@ public class AiCodeGeneratorFactory {
                     .build();
             chatHistoryService.loadChatHistory(Long.valueOf(conversationId), chatMemory, 20);
             return ChatClient.builder(chatModel)
-                    .defaultAdvisors(
-                            MessageChatMemoryAdvisor.builder(chatMemory).build(),
-                            QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build())
+                    .defaultAdvisors(buildAdvisors(chatMemory))
                     .build();
         });
         return chatClient.prompt().user(prompt).stream().content();

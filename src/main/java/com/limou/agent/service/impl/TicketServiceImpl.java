@@ -166,14 +166,21 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "订单未支付或已取消/退款，无法核销");
         }
 
-        // 核销
-        ticket.setStatus(1);
-        ticket.setCheckedInAt(LocalDateTime.now());
-        ticket.setCheckedBy(operatorId);
-        boolean updated = updateById(ticket);
-        if (!updated) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "核销失败，请重试");
+        // 核销（乐观条件更新：仅当仍是"未使用"状态才更新，防并发双核销）
+        Ticket update = new Ticket();
+        update.setStatus(1);
+        update.setCheckedInAt(LocalDateTime.now());
+        update.setCheckedBy(operatorId);
+        int updated = mapper.updateByQuery(update,
+                QueryWrapper.create()
+                        .eq("id", ticket.getId())
+                        .eq("status", TicketStatusEnum.UNUSED.getValue()));
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "核销失败，该票状态已变化（可能已被核销），请刷新重试");
         }
+        ticket.setStatus(1);
+        ticket.setCheckedInAt(update.getCheckedInAt());
+        ticket.setCheckedBy(operatorId);
         log.info("管理员 {} 核销票 {}（订单 {} 座位 {}）", operatorId, ticket.getTicketCode(),
                 ticket.getOrderId(), ticket.getSeatLabel());
 
@@ -243,20 +250,13 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket> impleme
         if (orderId == null) {
             return 0;
         }
-        List<Ticket> tickets = listByOrder(orderId);
-        if (CollUtil.isEmpty(tickets)) {
-            return 0;
-        }
-        int n = 0;
-        for (Ticket t : tickets) {
-            // 仅未核销的票置为已退票（已核销/已退票的不动）
-            if (t.getStatus() == null || TicketStatusEnum.UNUSED == TicketStatusEnum.getEnumByValue(t.getStatus())) {
-                t.setStatus(TicketStatusEnum.REFUNDED.getValue());
-                updateById(t);
-                n++;
-            }
-        }
-        return n;
+        // 仅未核销/未使用的票置为已退票（已核销/已退票/已过期的不动）
+        Ticket update = new Ticket();
+        update.setStatus(TicketStatusEnum.REFUNDED.getValue());
+        return mapper.updateByQuery(update,
+                QueryWrapper.create()
+                        .eq("orderId", orderId)
+                        .and("(status = ? OR status IS NULL)", TicketStatusEnum.UNUSED.getValue()));
     }
 
     /**

@@ -4,6 +4,8 @@ import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatch;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatchService;
 import com.limou.agent.mapper.FilmMapper;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
@@ -16,6 +18,7 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -44,6 +47,9 @@ public class SearchFilmsTool extends BaseTool {
     @Resource
     private MovieStateManager stateManager;
 
+    @Resource
+    private FuzzyMatchService fuzzyMatchService;
+
     @Tool(description = "搜索影片，支持按名称关键词和影片类型筛选。返回影片列表JSON，包含影片ID、名称、类型、评分、时长、海报、简介。最多返回5部，推荐时向用户展示3-5部即可，不要全部列出")
     public String searchFilms(
             @ToolParam(description = "影片名称关键词（可选）") String keyword,
@@ -61,8 +67,10 @@ public class SearchFilmsTool extends BaseTool {
                         QueryWrapper.create()
                                 // 可上映影片：热映 hot + 正在上映 published 都可推荐（草稿/下线不展示）
                                 .in(Film::getStatus, List.of("hot", "published")));
-                // 按评分降序排列，不随机——保证每次推荐结果一致
+                Collections.shuffle(all);
+                int randomCount = 3 + new Random().nextInt(3); // 3 ~ 5 随机
                 films = all.stream()
+                        .limit(randomCount)
                         .sorted(Comparator.comparing(Film::getRating,
                                 Comparator.nullsLast(Comparator.reverseOrder())))
                         .collect(Collectors.toList());
@@ -121,6 +129,22 @@ public class SearchFilmsTool extends BaseTool {
                 films = films.subList(0, 5);
             }
 
+            // ★ 模糊纠错：SQL like 查空且有关键词时，降级拼音/别名匹配
+            // （支柱下 → 蜘蛛侠·崭新之日；"蜘蛛侠" → "蜘蛛侠·崭新之日"）
+            FuzzyMatch fuzzyHit = null;
+            if (films.isEmpty() && keyword != null && !keyword.isBlank()) {
+                java.util.Optional<FuzzyMatch> fm = fuzzyMatchService.matchFilm(keyword);
+                if (fm.isPresent() && fm.get().matchedId() != null) {
+                    Film matched = filmMapper.selectOneById(fm.get().matchedId());
+                    if (matched != null) {
+                        films = java.util.List.of(matched);
+                        fuzzyHit = fm.get();
+                        log.info("SearchFilms 模糊纠错: '{}' -> '{}' (置信度 {}, source {})",
+                                keyword, fuzzyHit.matchedName(), fuzzyHit.confidence(), fuzzyHit.source());
+                    }
+                }
+            }
+
             List<Map<String, Object>> filmList = films.stream().map(f -> {
                 Map<String, Object> map = new HashMap<>();
                 map.put("filmId", f.getId());
@@ -140,6 +164,14 @@ public class SearchFilmsTool extends BaseTool {
             Map<String, Object> result = new HashMap<>();
             result.put("films", filmList);
             result.put("total", filmList.size());
+            // 模糊纠错信息（前端/LLM 可选展示；不影响既有结构）
+            if (fuzzyHit != null) {
+                result.put("correctedName", fuzzyHit.matchedName());
+                result.put("fuzzy", true);
+                result.put("fuzzyConfidence", fuzzyHit.confidence());
+                // 匹配依据：片名 / 主演:吴京 / 导演:郭帆 / 别名 / 英文名；LLM 据此判断是"用户说对片名"还是"按演员推断"
+                result.put("fuzzyBasis", fuzzyHit.matchBasis());
+            }
 
             // ★ ReAct 模式下写回 filmId 到 ConversationState，确保下一轮 Graph 有上下文
             String convId = ConversationContext.get();

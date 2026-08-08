@@ -122,4 +122,15 @@ public interface OrderService extends IService<Order> {
      * 查找用户对某影片的已完成/已支付订单ID（用于关联影评）。
      */
     Long findCompletedOrderId(Long userId, Long filmId);
+
+    /**
+     * 支付成功统一处理：置订单已支付 + 座位标记已售 + 生成票 + 释放Redis锁 + SSE通知。
+     * <p>
+     * <b>必须为事务方法且异常向外传播</b>：任一步（尤其生成票）失败时整单回滚，
+     * 支付宝 notify 重试时才不会因"订单已 PAID"而跳过生成票。
+     *
+     * @param order   待处理订单（仅读取，内部会 update）
+     * @param tradeNo 支付宝交易号（模拟支付为 MOCK_ 前缀）
+     */
+    void handlePaymentSuccess(Order order, String tradeNo);
 }

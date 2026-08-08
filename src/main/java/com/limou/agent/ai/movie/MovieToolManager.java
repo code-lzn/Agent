@@ -59,6 +59,9 @@ public class MovieToolManager {
     @Qualifier("mcpToolCallbacks")
     private ToolCallbackProvider mcpToolCallbackProvider;
 
+    @Resource
+    private ExitTool exitTool;
+
     /**
      * 电影票 Agent 专用工具回调数组
      * 使用 @Qualifier("movieToolCallbacks") 注入到 MovieAgentFactory
@@ -76,7 +79,9 @@ public class MovieToolManager {
                 getUserPreferenceTool,
                 searchNearbyCinemasTool,
                 locateUserTool,
-                queryOrderTool);
+                queryOrderTool,
+                exitTool
+                );
 
         ToolCallback[] mcp = mcpToolCallbackProvider != null
                 ? mcpToolCallbackProvider.getToolCallbacks()
@@ -106,6 +111,7 @@ public class MovieToolManager {
         map.put(getUserPreferenceTool.getToolName(), getUserPreferenceTool.getDisplayName());
         map.put(searchNearbyCinemasTool.getToolName(), searchNearbyCinemasTool.getDisplayName());
         map.put(locateUserTool.getToolName(), locateUserTool.getDisplayName());
+        map.put(exitTool.getToolName(),exitTool.getDisplayName());
         return map;
     }
 }

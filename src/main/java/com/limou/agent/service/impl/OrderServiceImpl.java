@@ -280,33 +280,16 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "仅待支付订单可模拟支付");
         }
 
-        // 模拟支付：直接标记为已支付
-        order.setStatus(OrderStatusEnum.PAID.getValue());
-        order.setPaidAt(LocalDateTime.now());
-        order.setAlipayTradeNo("MOCK_" + IdUtil.getSnowflakeNextIdStr());
-        order.setAlipayStatus("TRADE_SUCCESS");
-        this.updateById(order);
-
-        // 更新座位为已售
-        QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
-        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
-        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
-        if (CollUtil.isNotEmpty(seatIds)) {
-            List<Seat> seats = seatService.listByIds(seatIds);
-            seats.forEach(s -> s.setStatus("sold"));
-            seatService.updateBatch(seats);
-            // 支付成功才生成票：每座位一张（独立 8 位取票码）；幂等避免重复生成
-            ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
-        }
+        // 模拟支付：统一走 handlePaymentSuccess（置已支付 + 座位已售 + 生成票 + 释放锁 + SSE）
+        String mockTradeNo = "MOCK_" + IdUtil.getSnowflakeNextIdStr();
+        order.setAlipayTradeNo(mockTradeNo);
+        handlePaymentSuccess(order, mockTradeNo);
 
         log.info("用户 {} 模拟支付成功，订单号: {}", userId, order.getOrderNo());
 
-        // 通过 SSE 推送通知前端
-        try {
-            orderStatusNotifier.notifyOrderPaid(userId, order.getId());
-        } catch (Exception ignored) {
-        }
-
+        // 查询关联座位（重新查，handlePaymentSuccess 内部查询不可复用）
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
         List<String> seatLabels = orderSeats.stream()
                 .map(OrderSeat::getSeatLabel)
                 .collect(Collectors.toList());
@@ -340,6 +323,49 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 每张票（独立取票码 + 动态核销状态）
         vo.setTickets(ticketService.getTicketsByOrder(orderId));
         return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void handlePaymentSuccess(Order order, String tradeNo) {
+        log.info("[handlePaymentSuccess] 进入, orderId={}, tradeNo={}, scheduleId={}", order.getId(), tradeNo, order.getScheduleId());
+
+        order.setStatus(OrderStatusEnum.PAID.getValue());
+        order.setPaidAt(LocalDateTime.now());
+        order.setAlipayTradeNo(tradeNo);
+        order.setAlipayStatus("TRADE_SUCCESS");
+        this.updateById(order);
+        log.info("[handlePaymentSuccess] 订单已置为已支付, orderId={}", order.getId());
+
+        // 更新座位为已售
+        QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
+        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+        log.info("[handlePaymentSuccess] 查询到订单座位关联 {} 条, orderId={}", orderSeats.size(), order.getId());
+        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).collect(Collectors.toList());
+        if (CollUtil.isNotEmpty(seatIds)) {
+            List<Seat> seats = seatService.listByIds(seatIds);
+            log.info("[handlePaymentSuccess] 查询到座位 {} 个, orderId={}, seatIds={}", seats.size(), order.getId(), seatIds);
+            seats.forEach(s -> s.setStatus("sold"));
+            seatService.updateBatch(seats);
+
+            // 支付成功才生成票：每座位一张（独立 8 位取票码）；幂等避免重复生成
+            ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
+            log.info("[handlePaymentSuccess] createTickets 已调用完成, orderId={}", order.getId());
+
+            // 清理 Redis 锁集合
+            seatLockService.releaseSeats(order.getScheduleId(), seatIds);
+            log.info("[handlePaymentSuccess] Redis 锁已释放, orderId={}", order.getId());
+        } else {
+            log.warn("[handlePaymentSuccess] 订单无座位关联, 跳过生成票! orderId={}", order.getId());
+        }
+
+        // 通过 SSE 推送通知前端（推送失败不影响支付/票事务）
+        try {
+            orderStatusNotifier.notifyOrderPaid(order.getUserId(), order.getId());
+            log.info("[handlePaymentSuccess] 订单 {} 支付成功 SSE 已推送", order.getId());
+        } catch (Exception e) {
+            log.warn("[handlePaymentSuccess] SSE 推送失败, orderId={}", order.getId(), e);
+        }
     }
 
     @Override

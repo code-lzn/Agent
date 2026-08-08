@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 电影票对话状态
@@ -136,6 +137,33 @@ public class ConversationState implements Serializable {
             case "price" -> budgetMax != null;
             default -> false;
         };
+    }
+
+    /** 明确委托 AI 自动选座/下单的关键词（"帮我看看"这类查看词不算） */
+    private static final Pattern AUTO_PICK_PATTERN = Pattern.compile(
+            "(帮我|你帮我).{0,4}(选|买|订|下单|锁)"   // 帮我选/帮我买两张/你帮我订…
+                    + "|就按|按你|听你的|随便|看着办"  // 就按你推荐的/听你的/随便
+                    + "|你(来|定|选|挑|推荐)"           // 你来选/你定/你推荐
+                    + "|直接(下单|买|订|锁|选)"         // 直接下单/直接买
+                    + "|自动(选座|选|下单)");            // 自动选座
+
+    /**
+     * 是否允许 AI 自动选座（有选座偏好 或 消息里明确委托 AI 选座/下单）。
+     * <ul>
+     *   <li>"中间两个" / "帮我选中间3个座位" → 有 preferredSeatZone → true</li>
+     *   <li>"帮我买两张" / "你帮我订" / "直接下单" / "就按你推荐的" → 消息明确委托 → true</li>
+     *   <li>"两位" / "两张" / "2个人"（只报票数，无偏好无委托）→ false，应展示座位图让用户自己选</li>
+     *   <li>"帮我看看座位"（只是查看）→ 不含选/买/订等委托动词 → false</li>
+     * </ul>
+     */
+    public boolean canAutoPickSeats(String userMessage) {
+        if (preferredSeatZone != null && !preferredSeatZone.isEmpty()) {
+            return true;
+        }
+        if (userMessage == null) {
+            return false;
+        }
+        return AUTO_PICK_PATTERN.matcher(userMessage).find();
     }
 
     /**
