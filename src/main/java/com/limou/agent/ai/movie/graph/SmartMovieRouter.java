@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 public class SmartMovieRouter {
 
     /** 一条消息里同时出现"订/买/购" + 以下至少 2 类关键词 → 直接 ReAct */
-    private static final Pattern BOOKING_KEYWORD = Pattern.compile("(订|买|购|下单|抢|选座|选.{0,2}座位|要).*(票|座|位)");
+    private static final Pattern BOOKING_KEYWORD = Pattern.compile("(订|买|购|下单|抢|选座|选.{0,2}座位|要|预约|预定).*(票|座|位)");
     /** 影片 + 影院 + 座位诉求 → 即使没有显式订票词也走 ReAct（如"想看志愿3在万达，给我座位表"） */
     private static final Pattern SEAT_REQUEST_HINT = Pattern.compile("(座|位|选.{0,2}座|座.{0,2}表|座.{0,2}图)");
     private static final Pattern MOVIE_NAME_HINT = Pattern.compile(

@@ -95,54 +95,94 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
     }
 
     /**
-     * 智能重定向：当用户意图需要的前置条件不满足时，自动降级到上一步。
+     * 智能重定向：当用户意图需要的前置条件不满足时，自动沿订票链降级到上一步。
+     *
+     * <h3>订票链条（每一步依赖前一步的输出）</h3>
      * <pre>
-     *   get_seat_map 缺 scheduleId → search_schedule（有 filmId 时）
-     *   lock_seats   缺 seatIds   → get_seat_map（无偏好/委托时，展示座位图）
-     *   create_order 缺 seatIds   → lock_seats（有偏好/委托）或 get_seat_map（只报票数时）
+     *   search_movie → search_schedule → get_seat_map → lock_seats → create_order → pay_order
+     *       ↑               ↑                ↑              ↑             ↑            ↑
+     *      需要 filmName   需要 filmId      需要 scheduleId 需要 scheduleId+seatIds  需要 orderId
      * </pre>
-     * <p>
-     * ★ 自动选座闸门：只有用户明确表达选座偏好（中间/靠前/全场等）或明确委托 AI 选座/下单
-     * （"帮我选""直接下单""就按你推荐的"等）才允许保留/升级为 lock_seats 并自动选座+下单。
-     * 只报票数（如"两位""两张"）没让 AI 选座 → 降级 get_seat_map 展示座位图（回复里追问选座偏好），
-     * 避免"什么都没说就擅自锁座下单"。
+     * 任一层级缺失前置条件时，自动回退到能补齐缺失信息的步骤。
      */
     private String resolveIntent(String intent, ConversationState state, String conversationId, String userMessage) {
         return switch (intent) {
+            // ──────── 层级4: 展示座位图 ────────
             case "get_seat_map" -> {
-                if (state.getScheduleId() == null && state.getFilmId() != null) {
-                    yield "search_schedule";
+                // ★ 缺场次 → 退回查场次或搜影片
+                if (state.getScheduleId() == null) {
+                    if (state.getFilmId() != null) {
+                        yield "search_schedule";  // 有影片 → 查场次
+                    }
+                    if (has(state.getFilmName())) {
+                        yield "search_movie";  // 有影片名 → 先搜影片
+                    }
+                    yield "chat";  // 什么都没有 → 追问
                 }
-                // 用户明确要求自动选座（有选座偏好或消息明确委托）→ 升级为 lock_seats 自动锁座下单；
-                // 只报了票数（如"两位"）→ 保持 get_seat_map 展示座位图，让用户自己选/回复里追问偏好
+                // 用户明确要求自动选座 → 升级为 lock_seats 自动锁座下单
                 if (state.canAutoPickSeats(userMessage)) {
                     yield "lock_seats";
                 }
                 yield intent;
             }
+            // ──────── 层级2: 查场次 ────────
             case "search_schedule" -> {
-                // filmId 未解析但 filmName 已知 → 先搜影片
-                if (state.getFilmId() == null && has(state.getFilmName())) {
-                    yield "search_movie";
+                if (state.getFilmId() == null) {
+                    if (has(state.getFilmName())) {
+                        yield "search_movie";  // 有影片名 → 先搜影片
+                    }
+                    yield "chat";  // 什么都没有 → 追问
                 }
                 yield intent;
             }
+            // ──────── 层级5: 锁座 ────────
             case "lock_seats" -> {
-                // 缺座位且不允许自动选座（无偏好、也没明确让 AI 选座）→ 降级展示座位图让用户手动选
-                // （"帮我选中间3个座位"/"帮我买两张"等有偏好或明确委托 → 保留 lock_seats 自动选座）
+                // 缺场次 → 退回查场次或搜影片
+                if (state.getScheduleId() == null) {
+                    if (state.getFilmId() != null) {
+                        yield "search_schedule";
+                    }
+                    if (has(state.getFilmName())) {
+                        yield "search_movie";
+                    }
+                    yield "chat";
+                }
+                // 缺座位且不允许自动选座 → 展示座位图让用户手动选
                 if ((state.getSeatIds() == null || state.getSeatIds().isEmpty())
-                        && state.getScheduleId() != null
                         && !state.canAutoPickSeats(userMessage)) {
                     yield "get_seat_map";
                 }
                 yield intent;
             }
+            // ──────── 层级6: 下单 ────────
             case "create_order" -> {
-                // 座位未锁定但已有场次 → 用户明确让 AI 选座（偏好/委托）→ 先 lock_seats 自动选座，锁座成功条件边会自动下单；
-                // 只报票数没让 AI 选座 → 降级 get_seat_map 展示座位图，避免"什么都没说就擅自锁座下单"
-                if ((state.getSeatIds() == null || state.getSeatIds().isEmpty())
-                        && state.getScheduleId() != null) {
+                // 缺场次 → 退回查场次或搜影片
+                if (state.getScheduleId() == null) {
+                    if (state.getFilmId() != null) {
+                        yield "search_schedule";
+                    }
+                    if (has(state.getFilmName())) {
+                        yield "search_movie";
+                    }
+                    yield "chat";
+                }
+                // 缺座位 → 自动选座 或 展示座位图让用户选
+                if (state.getSeatIds() == null || state.getSeatIds().isEmpty()) {
                     yield state.canAutoPickSeats(userMessage) ? "lock_seats" : "get_seat_map";
+                }
+                yield intent;
+            }
+            // ──────── 层级7: 支付 ────────
+            case "pay_order" -> {
+                if (state.getOrderId() == null) {
+                    yield "chat";  // 没有订单号 → 无法支付，追问用户
+                }
+                yield intent;
+            }
+            // ──────── 查询订单 ────────
+            case "query_order" -> {
+                if (state.getOrderId() == null) {
+                    yield "chat";  // 没有订单号 → 无法查询，追问用户
                 }
                 yield intent;
             }
