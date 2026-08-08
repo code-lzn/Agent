@@ -23,6 +23,8 @@ import org.springframework.web.client.RestTemplate;
 
 import com.limou.agent.utils.GeoUtils;
 
+import java.util.Comparator;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -90,17 +92,9 @@ public class SearchNearbyCinemasTool extends BaseTool {
 
             // ========== Step 2: POI 周边搜索 — 搜索附近电影院 ==========
             List<AmapPoi> amapPois = searchAroundCinemas(resultLng, resultLat, r);
-            if (amapPois.isEmpty()) {
-                Map<String, Object> result = new LinkedHashMap<>();
-                result.put("cinemas", List.of());
-                result.put("total", 0);
-                result.put("center", location);
-                result.put("radius", r);
-                result.put("message", "在「" + location + "」附近" + (r / 1000) + "公里内未找到影院，可以试试扩大搜索范围");
-                return objectMapper.writeValueAsString(result);
-            }
 
             // ========== Step 3: 与系统影院数据库匹配 ==========
+            // ★ 即使 Amap 返回空，仍执行 matchWithDatabase：DB 中有坐标的影院可补充
             List<Map<String, Object>> matchedList = matchWithDatabase(amapPois, filmId, resultLng, resultLat);
 
             // ========== Step 4: 写回 ConversationState ==========
@@ -312,6 +306,10 @@ public class SearchNearbyCinemasTool extends BaseTool {
             map.put("hasSchedule", hasSchedule);
             result.add(map);
         }
+
+        // ★ 按距离从近到远排序
+        result.sort(Comparator.comparingInt(m ->
+                ((Number) m.getOrDefault("distanceMeters", Integer.MAX_VALUE)).intValue()));
 
         return result;
     }

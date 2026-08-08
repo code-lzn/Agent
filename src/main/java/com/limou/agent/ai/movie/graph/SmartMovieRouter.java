@@ -27,10 +27,22 @@ public class SmartMovieRouter {
     private static final Pattern MOVIE_NAME_HINT = Pattern.compile(
             "《.+》|流浪地球|封神|哪吒|长安|万里|满江红|热辣|飞驰|人生|八角笼|孤注一掷|消失的她"
                     + "|志愿|战狼|红海|唐探|捉妖|大圣|白蛇|姜子牙|深海|熊出没|长津湖|水门桥|狙击手|奇迹|独行月球"
+                    + "|蜘蛛侠|阿凡达|复仇者|钢铁侠|变形金刚|速度与激情|哈利波特|指环王|黑客帝国|星际穿越|盗梦空间|敦刻尔克|奥本海默"
                     + "|\\S{2,4}[：:]\\S");
     private static final Pattern TIME_HINT = Pattern.compile("(今天|明天|后天|周[一二三四五六日]|上午|下午|晚上|凌晨|\\d+点|\\d+:\\d+)");
     private static final Pattern CINEMA_HINT = Pattern
             .compile("(影院|影城|万达|CGV|金逸|中影|大地|博纳|卢米埃|百老汇|英皇|UA|离.{0,5}近|附近|旁边)");
+    /** ★ 多部影片 + 下单：如"看A和B，都帮我选中间的票，直接下单" */
+    private static final Pattern MULTI_MOVIE_BOOKING = Pattern.compile(
+            "(看|想看).{0,20}(和|跟|与|还有).{0,20}(看|电影|影片)"
+                    + "|(都|全|每).{0,5}(帮|给).{0,5}(选|买|订|下单)");
+    /** ★ "直接下单" / "帮我下单" + 已有上下文 → 跳过搜索直接锁座 */
+    private static final Pattern DIRECT_ORDER = Pattern.compile(
+            "(直接|马上|立刻|现在).{0,3}(下单|买|订|支付)"
+                    + "|(帮|给).{0,5}(下单|买票|订票)");
+    /** ★ 通用影片名模式：中文名+数字后缀（如"XX3""XX2"） */
+    private static final Pattern MOVIE_NAME_SUFFIX = Pattern.compile(
+            "[\\u4e00-\\u9fa5]{2,6}\\d{1,2}(?!\\d)");
     private static final Pattern GREETING_PATTERN = Pattern.compile("^(你好|hi|hello|嗨|在吗|在不在|嘿|哈喽|早上好|下午好|晚上好)[!！。.]*$");
     private static final Pattern CANCEL_PATTERN = Pattern.compile("(算了|不买了|取消|不要了|放弃|改天|下次)");
     private static final Pattern NEARBY_CINEMA_PATTERN = Pattern.compile(
@@ -50,7 +62,7 @@ public class SmartMovieRouter {
     /** "附近有什么"、"周围有好吃的吗"—— 基础定位查询，需要先定位再搜索 */
     private static final Pattern AROUND_ME_PATTERN = Pattern.compile(
             "(附近|周边|周围|本地|这里).{0,5}(有|能|可以|什么|哪些|哪里|好玩|好吃)");
-    /** 清晰的定位问题：我在哪  */
+    /** 清晰的定位问题：我在哪 */
     private static final Pattern DIRECT_LOCATE_PATTERN = Pattern.compile(
             "我在哪|我的位置|我现在的位置|当前位置|查询位置|定位$|定位我|我在什么地方");
 
@@ -96,7 +108,7 @@ public class SmartMovieRouter {
         if (matches(LOCATION_NAME_PATTERN, message) && !matches(CINEMA_HINT, message)) {
             log.info("Router: 规则命中 地理位置名 → GRAPH (search_nearby)");
             ConversationState locSlots = new ConversationState();
-            locSlots.setCinemaName(message.trim());  // 作为地理位置描述传入
+            locSlots.setCinemaName(message.trim()); // 作为地理位置描述传入
             return SmartRouteResult.graph(GraphIntentResult.builder()
                     .intent("search_nearby")
                     .slots(locSlots)
@@ -115,9 +127,33 @@ public class SmartMovieRouter {
             return SmartRouteResult.graph(null);
         }
 
+        // ★ 多部影片 + 下单（如"看A和B，都帮我选中间的票，直接下单"）→ REACT
+        if (matches(MULTI_MOVIE_BOOKING, message)
+                && (matches(BOOKING_KEYWORD, message) || matches(DIRECT_ORDER, message))) {
+            log.info("Router: 规则命中 多部影片+下单 → REACT");
+            return SmartRouteResult.react();
+        }
+
+        // ★ 通用影片名+数字后缀（如"流浪地球3""封神2"）+ 购票 → REACT
+        if (matches(MOVIE_NAME_SUFFIX, message) && matches(BOOKING_KEYWORD, message)
+                && (matches(TIME_HINT, message) || matches(CINEMA_HINT, message))) {
+            log.info("Router: 规则命中 影片名+数字后缀+购票 → REACT");
+            return SmartRouteResult.react();
+        }
+
+        // ★ 直接下单（有上下文时直接走锁座链路）→ 无上下文走 Graph
+        if (matches(DIRECT_ORDER, message)) {
+            if (state != null && state.getFilmId() != null) {
+                log.info("Router: 规则命中 直接下单+有影片 → GRAPH (锁座下单)");
+                return SmartRouteResult.graph(null);
+            }
+            log.info("Router: 规则命中 直接下单+无上下文 → REACT");
+            return SmartRouteResult.react();
+        }
+
         // ★ 明确购票意图（订/买/购/下单/选座…票座）+ 已有影片 → 走 Graph 的确定性锁座下单链路
-        //   （Graph 内 LockSeatsNode 自动解析场次 → 自动选座 → 锁座 → 条件边 create_order，一次完成；
-        //     避免 ReAct 下 LLM 工具调用不稳定——只锁座停下/重复下单）
+        // （Graph 内 LockSeatsNode 自动解析场次 → 自动选座 → 锁座 → 条件边 create_order，一次完成；
+        // 避免 ReAct 下 LLM 工具调用不稳定——只锁座停下/重复下单）
         if (matches(BOOKING_KEYWORD, message) && state != null && state.getFilmId() != null) {
             log.info("Router: 购票意图 + 已有影片 → GRAPH (确定性锁座下单)");
             return SmartRouteResult.graph(null);
@@ -228,7 +264,8 @@ public class SmartMovieRouter {
      * 判断是否已有实质性的对话上下文——有则走 Graph 维护状态，不走 ReAct。
      */
     private boolean hasExistingContext(ConversationState state) {
-        if (state == null) return false;
+        if (state == null)
+            return false;
         return (state.getFilmId() != null && state.getCinemaId() != null)
                 || state.getScheduleId() != null
                 || state.getOrderId() != null;
