@@ -284,4 +284,7 @@ public class SmartMovieRouter {
     private boolean matches(Pattern p, String s) {
         return p.matcher(s).find();
     }
+//    p.matcher(s)：创建一个“匹配器”工具，准备拿规则 p 去扫描字符串 s。
+//
+//.find()：拿着扫描器从字符串开头到结尾搜索，一旦找到任意一个符合规则的子串，立即返回 true；如果整个字符串扫描完都没找到，返回 false。
 }
