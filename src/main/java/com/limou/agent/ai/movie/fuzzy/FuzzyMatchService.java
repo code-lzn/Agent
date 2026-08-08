@@ -50,7 +50,8 @@ public class FuzzyMatchService {
             Optional<FilmPinyinIndex.FilmEntry> entry = filmIndex.findByNameExact(alias.get());
             if (entry.isPresent()) {
                 FilmPinyinIndex.FilmEntry e = entry.get();
-                return Optional.of(new FuzzyMatch(keyword, e.name(), e.id(), 95, FuzzyMatch.Source.ALIAS));
+                return Optional.of(new FuzzyMatch(keyword, e.name(), e.id(), 95,
+                        FuzzyMatch.Source.ALIAS, "别名"));
             }
             // 别名标准名在 DB 中不存在 → 降级继续拼音（兜底防丢失）
             log.warn("影片别名目标未在 DB 找到: '{}' -> '{}'", keyword, alias.get());
@@ -71,7 +72,8 @@ public class FuzzyMatchService {
             Optional<CinemaPinyinIndex.CinemaEntry> entry = cinemaIndex.findByNameExact(alias.get());
             if (entry.isPresent()) {
                 CinemaPinyinIndex.CinemaEntry e = entry.get();
-                return Optional.of(new FuzzyMatch(keyword, e.name(), e.id(), 95, FuzzyMatch.Source.ALIAS));
+                return Optional.of(new FuzzyMatch(keyword, e.name(), e.id(), 95,
+                        FuzzyMatch.Source.ALIAS, "别名"));
             }
             log.warn("影院别名目标未在 DB 找到: '{}' -> '{}'", keyword, alias.get());
         }

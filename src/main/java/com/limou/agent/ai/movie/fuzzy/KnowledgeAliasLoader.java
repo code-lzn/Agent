@@ -16,8 +16,9 @@ import java.util.Optional;
 /**
  * 知识库别名加载器：解析 {@code document/输入纠错与意图映射.md} 的纠错表为别名 Map。
  * <p>
- * 以代码常量 {@link #DEFAULT_ALIASES} 为基底（解析失败/内容缺失时兜底），
- * md 表格解析成功后覆盖并补充。解析失败仅 warn 不阻断启动。
+ * 影片别名只来自 md 解析（无代码常量兜底，用户要求不硬编码）；影院/厅型别名以代码常量
+ * {@link #DEFAULT_CINEMA_ALIASES}/{@link #DEFAULT_HALL_ALIASES} 为基底、md 覆盖补充。
+ * 解析失败仅 warn 不阻断启动。
  */
 @Slf4j
 @Component
@@ -26,23 +27,16 @@ public class KnowledgeAliasLoader {
     private static final String DOC_PATH = "classpath*:document/输入纠错与意图映射.md";
 
     private static final String SECTION_FILM = "影片名称纠错";
+    /** 2.1 影片模糊匹配规则段（主演/剧情/IP 角色映射），并入影片别名表 */
+    private static final String SECTION_FILM_RULE = "影片模糊匹配规则";
     private static final String SECTION_CINEMA = "影院名称纠错";
     private static final String SECTION_HALL = "影厅类型纠错";
 
     /**
-     * 代码常量兜底：md 缺失或解析失败时的别名基底。必须含核心用例（支柱下→蜘蛛侠）。
-     * key=规范化后的别名（normalize 结果），value=标准名（DB 权威名）。
-     * 影片/影院/厅型各自独立，保证 md 解析失败时三类兜底都不丢失。
+     * 影片别名无代码常量兜底：用户要求别名只来自知识库 md，不硬编码。
+     * md 解析失败/缺失时 filmAliases 为空 → 匹配层降级到拼音（片名/主演/导演/英文名）。
+     * 影院/厅型仍保留代码兜底（与 md 1.2/1.3 等价，避免回归）。
      */
-    private static final Map<String, String> DEFAULT_FILM_ALIASES = Map.of(
-            "支柱下", "蜘蛛侠·崭新之日",
-            "蜘蛛侠", "蜘蛛侠·崭新之日",
-            "崭新之日", "蜘蛛侠·崭新之日",
-            "流浪地球", "流浪地球3",
-            "封神", "封神第二部",
-            "哪吒", "哪吒之魔童闹海",
-            "热辣", "热辣滚烫",
-            "熊出没", "熊出没·逆转时空");
 
     private static final Map<String, String> DEFAULT_CINEMA_ALIASES = Map.of(
             "万达", "洛阳万达影城(泉舜店)",
@@ -68,7 +62,8 @@ public class KnowledgeAliasLoader {
             Map.entry("贵宾", "VIP"),
             Map.entry("vip", "VIP"));
 
-    private final Map<String, String> filmAliases = new HashMap<>(DEFAULT_FILM_ALIASES);
+    /** 影片别名仅来自 md 解析（无代码兜底），md 缺失时为空 Map */
+    private final Map<String, String> filmAliases = new HashMap<>();
     private final Map<String, String> cinemaAliases = new HashMap<>(DEFAULT_CINEMA_ALIASES);
     private final Map<String, String> hallAliases = new HashMap<>(DEFAULT_HALL_ALIASES);
 
@@ -124,11 +119,16 @@ public class KnowledgeAliasLoader {
                 }
                 String aliasCell = cells[1].trim();
                 String canonical = cells[2].trim();
-                // 跳过表头
-                if (aliasCell.contains("用户输入") || canonical.contains("纠错")) {
+                // 跳过表头（1.1/1.2/1.3 为「用户输入」，2.1 为「用户表述」，统一按「用户」判断）
+                if (aliasCell.contains("用户") || canonical.contains("纠错")) {
                     continue;
                 }
                 if (aliasCell.isEmpty() || canonical.isEmpty()) {
+                    continue;
+                }
+                // 多目标/含评分行防污染：应匹配影片含分隔符或括号（如 2.1 的「动画片/喜剧/评分最高的」）
+                // → 这类行是多影片映射或带排序提示，不入别名表（别名表仅支持 单别名→单标准名）
+                if (canonical.matches(".*[/()（）、，,].*")) {
                     continue;
                 }
                 for (String variant : aliasCell.split("/")) {
@@ -147,7 +147,7 @@ public class KnowledgeAliasLoader {
         if (section == null) {
             return null;
         }
-        if (section.contains(SECTION_FILM)) {
+        if (section.contains(SECTION_FILM) || section.contains(SECTION_FILM_RULE)) {
             return filmAliases;
         }
         if (section.contains(SECTION_CINEMA)) {
