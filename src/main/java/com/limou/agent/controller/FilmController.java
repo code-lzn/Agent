@@ -9,6 +9,7 @@ import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.model.dto.film.FilmQueryRequest;
 import com.limou.agent.service.ScheduleService;
+import com.limou.agent.task.FilmCacheRefresher;
 import com.mybatisflex.core.paginate.Page;
 import com.mybatisflex.core.query.QueryWrapper;
 import org.springframework.web.bind.annotation.*;
@@ -34,6 +35,9 @@ public class FilmController {
 
     @Autowired
     private ScheduleService scheduleService;
+
+    @Autowired
+    private FilmCacheRefresher filmCacheRefresher;
 
     // ========== 前台接口 ==========
 
@@ -141,6 +145,8 @@ public class FilmController {
     public BaseResponse<Long> save(@RequestBody Film film) {
         boolean result = filmService.save(film);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 影片新增后刷新模糊匹配索引 + RAG 向量库，无需重启即可被检索
+        filmCacheRefresher.refreshAll();
         return ResultUtils.success(film.getId());
     }
 
@@ -158,6 +164,7 @@ public class FilmController {
                 "该影片存在未放映的排片场次，禁止删除，请先下线");
         boolean result = filmService.removeById(id);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        filmCacheRefresher.refreshAll();
         return ResultUtils.success(true);
     }
 
@@ -168,6 +175,7 @@ public class FilmController {
     public BaseResponse<Boolean> update(@RequestBody Film film) {
         boolean result = filmService.updateById(film);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        filmCacheRefresher.refreshAll();
         return ResultUtils.success(true);
     }
 
@@ -211,6 +219,8 @@ public class FilmController {
         ThrowUtils.throwIf(film == null, ErrorCode.NOT_FOUND_ERROR);
         film.setStatus(status);
         boolean result = filmService.updateById(film);
+        // 状态变更影响 hot/published 集合，刷新缓存
+        filmCacheRefresher.refreshAll();
         return ResultUtils.success(result);
     }
 

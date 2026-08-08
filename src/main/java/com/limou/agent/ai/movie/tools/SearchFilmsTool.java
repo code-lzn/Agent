@@ -133,6 +133,8 @@ public class SearchFilmsTool extends BaseTool {
                 result.put("correctedName", fuzzyHit.matchedName());
                 result.put("fuzzy", true);
                 result.put("fuzzyConfidence", fuzzyHit.confidence());
+                // 匹配依据：片名 / 主演:吴京 / 导演:郭帆 / 别名 / 英文名；LLM 据此判断是"用户说对片名"还是"按演员推断"
+                result.put("fuzzyBasis", fuzzyHit.matchBasis());
             }
 
             // ★ ReAct 模式下写回 filmId 到 ConversationState，确保下一轮 Graph 有上下文

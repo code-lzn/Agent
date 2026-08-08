@@ -35,6 +35,9 @@ public class FilmStatusTask implements ApplicationRunner {
     @Autowired
     private ScheduleService scheduleService;
 
+    @Autowired
+    private FilmCacheRefresher filmCacheRefresher;
+
     /**
      * 应用启动时立即执行一次状态补偿：修复后端错过凌晨 3 点定时任务窗口的情况
      * （例如后端凌晨 3 点未运行，次日开机启动后自动将已到上映日期的影片转为 published）。
@@ -69,6 +72,8 @@ public class FilmStatusTask implements ApplicationRunner {
         films.forEach(f -> f.setStatus("published"));
         filmService.updateBatch(films);
         log.info("影片状态任务：{} 部准备上映影片已自动转为正在上映", films.size());
+        // 状态迁移改变 hot/published 集合 → 刷新模糊索引 + RAG 向量库
+        filmCacheRefresher.refreshAll();
     }
 
     /**
@@ -99,5 +104,7 @@ public class FilmStatusTask implements ApplicationRunner {
         finished.forEach(f -> f.setStatus("offline"));
         filmService.updateBatch(finished);
         log.info("影片状态任务：{} 部已放映完的影片自动下线", finished.size());
+        // 状态迁移改变 hot/published 集合 → 刷新模糊索引 + RAG 向量库
+        filmCacheRefresher.refreshAll();
     }
 }

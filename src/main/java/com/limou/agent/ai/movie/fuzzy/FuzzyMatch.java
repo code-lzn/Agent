@@ -8,14 +8,22 @@ package com.limou.agent.ai.movie.fuzzy;
  * @param matchedId    影片/影院 ID；厅型归一化为 null
  * @param confidence   置信度 0-100，对齐知识库 7.2 分级（&gt;90 静默 / 50-90 确认 / &lt;50 追问）
  * @param source       命中来源
+ * @param matchBasis   匹配依据（片名 / 主演:xx / 导演:xx / 英文名；别名命中为 null）
  */
 public record FuzzyMatch(
         String rawInput,
         String matchedName,
         Long matchedId,
         int confidence,
-        Source source
+        Source source,
+        String matchBasis
 ) {
+
+    /** 兼容既有 5 参调用（影院/别名分支等），matchBasis 置 null */
+    public FuzzyMatch(String rawInput, String matchedName, Long matchedId,
+                      int confidence, Source source) {
+        this(rawInput, matchedName, matchedId, confidence, source, null);
+    }
 
     /**
      * 命中来源
@@ -32,6 +40,10 @@ public record FuzzyMatch(
         /** 拼音编辑距离 */
         PINYIN_EDIT,
         /** 英文名匹配 */
-        ENGLISH
+        ENGLISH,
+        /** 按主演匹配 */
+        ACTOR,
+        /** 按导演匹配 */
+        DIRECTOR
     }
 }
