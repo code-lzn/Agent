@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -254,31 +256,171 @@ public class LockSeatsTool extends BaseTool {
         }
     }
 
+    /** 座位标签解析："5排6座" → {5, 6} */
+    private static final Pattern ROW_COL_PATTERN = Pattern.compile("(\\d+)排(\\d+)座");
+
     /**
-     * 查找附近可用座位作为替代推荐
+     * 查找可用座位作为替代推荐
+     * <p>
+     * ★ 修复"推荐很差"：原实现只取全厅 rowNum/colNum 升序前 10 个可用座位，
+     * 推荐出来的几乎都是最前排/最靠边的座位（如"1排1座、1排2座"），完全不贴近用户想坐的区域。
+     * <p>
+     * 新策略：
+     * ① 就近：优先推荐与冲突座位同排、且列号紧邻冲突列号的连续可用座位（用户原本想坐的区域）；
+     * ② 居中：跨排推荐时按"离中心排近 → 列号靠近影厅正中心"排序，不再推荐边角座；
+     * ③ 成块：同一排只返回一个连续可用块，保证前端"每排相邻两位配对成方案"能配出真正相邻的座位
+     *    （否则混入不连续座位会配出"5排4座+5排8座"这种奇怪方案）；
+     * ④ 覆盖：按用户想要的票数返回 3~5 个方案的量，让用户有得选。
      */
     private List<Map<String, Object>> findAlternatives(Long scheduleId, List<Map<String, Object>> unavailableSeats) {
         try {
-            // 查询所有可用座位，优先推荐同排相邻的
-            List<Seat> availableSeats = seatMapper.selectListByQuery(
+            // 拉取整厅可用座位（一个厅 80~200 座，全量内存计算足够快）
+            List<Seat> allSeats = seatMapper.selectListByQuery(
                     QueryWrapper.create()
                             .eq(Seat::getScheduleId, scheduleId)
-                            .eq(Seat::getStatus, "available")
-                            .orderBy(Seat::getRowNum, true)
-                            .orderBy(Seat::getColNum, true)
-                            .limit(10)
-            );
+                            .eq(Seat::getStatus, "available"));
+            if (allSeats.isEmpty()) {
+                return Collections.emptyList();
+            }
 
-            return availableSeats.stream().map(s -> {
-                Map<String, Object> map = new HashMap<>();
-                map.put("seatId", s.getId());
-                map.put("seatLabel", s.getSeatLabel());
-                map.put("zone", s.getZone());
-                return map;
-            }).collect(Collectors.toList());
+            // 按行分组（TreeMap 保证行号有序）
+            TreeMap<Integer, List<Seat>> byRow = allSeats.stream()
+                    .filter(s -> s.getRowNum() != null)
+                    .collect(Collectors.groupingBy(Seat::getRowNum, TreeMap::new, Collectors.toList()));
+
+            // 冲突锚点：解析"5排6座"拿用户原本想坐的行列（作为就近推荐的基准）
+            int anchorRow = -1;
+            int anchorCol = -1;
+            if (unavailableSeats != null && !unavailableSeats.isEmpty()) {
+                for (Map<String, Object> us : unavailableSeats) {
+                    String label = String.valueOf(us.get("seatLabel"));
+                    Matcher m = ROW_COL_PATTERN.matcher(label == null ? "" : label);
+                    if (m.find()) {
+                        anchorRow = Integer.parseInt(m.group(1));
+                        anchorCol = Integer.parseInt(m.group(2));
+                        break;
+                    }
+                }
+            }
+
+            // 影厅中心行 / 中心列
+            int centerRow = (byRow.firstKey() + byRow.lastKey()) / 2;
+            int maxCol = byRow.values().stream()
+                    .flatMap(List::stream)
+                    .mapToInt(s -> s.getColNum() != null ? s.getColNum() : 0)
+                    .max().orElse(0);
+            double midCol = maxCol / 2.0;
+
+            // 用户想要的票数（方案至少要能配出相邻的 2 张；单座冲突也按 2 张推荐，保证前端能配出方案）
+            int needCount = Math.max(2, unavailableSeats == null ? 1 : unavailableSeats.size());
+
+            // 行排序：冲突同排优先 → 离冲突排近 → 离中心排近
+            // （anchorRow 在解析循环中被赋值，非 effectively-final，先提成 final 副本供 lambda 捕获）
+            final int baseRow = anchorRow > 0 ? anchorRow : centerRow;
+            List<Integer> rows = new ArrayList<>(byRow.keySet());
+            rows.sort(Comparator
+                    .comparingInt((Integer r) -> Math.abs(r - baseRow))
+                    .thenComparingInt(r -> Math.abs(r - centerRow)));
+
+            List<Map<String, Object>> result = new ArrayList<>();
+            Map<String, Object> bestSingle = null;   // 全厅兜底：凑不出连座时的最佳单座
+            double bestSingleDist = Double.MAX_VALUE;
+            final int MAX_ALTS = 12;
+            for (int r : rows) {
+                if (result.size() >= MAX_ALTS) {
+                    break;
+                }
+                List<Seat> rowSeats = new ArrayList<>(byRow.get(r));
+                rowSeats.sort(Comparator.comparingInt(s -> s.getColNum() != null ? s.getColNum() : 0));
+                List<List<Seat>> runs = splitConsecutiveRuns(rowSeats);
+                if (runs.isEmpty()) {
+                    continue;
+                }
+                // 同排优先选"列中心最靠近锚点列"的块；跨排优先选"列中心最靠近影厅中心列"的块
+                double targetCol = (anchorRow == r && anchorCol > 0) ? anchorCol : midCol;
+                List<Seat> bestRun = null;
+                double bestDist = Double.MAX_VALUE;
+                for (List<Seat> run : runs) {
+                    double runCenter = (run.get(0).getColNum() + run.get(run.size() - 1).getColNum()) / 2.0;
+                    double dist = Math.abs(runCenter - targetCol);
+                    // 单座无法配成前端方案，仅作全厅兜底
+                    if (run.size() == 1 && dist < bestSingleDist) {
+                        bestSingleDist = dist;
+                        bestSingle = toAltMap(run.get(0));
+                    }
+                    // 只推荐 ≥2 座的连续块，保证前端能配出"相邻两位"方案
+                    if (run.size() >= 2 && dist < bestDist - 1e-9) {
+                        bestDist = dist;
+                        bestRun = run;
+                    }
+                }
+                if (bestRun == null) {
+                    continue;
+                }
+                // 块内取 needCount 张连续座位（优先取列中心最靠近目标列的子段；块不够长则整块都给）
+                List<Seat> take = bestWindow(bestRun, needCount, targetCol);
+                for (Seat s : take) {
+                    result.add(toAltMap(s));
+                }
+            }
+            // 全厅都凑不出连座时才退而推荐最佳单座，避免给空列表
+            if (result.isEmpty() && bestSingle != null) {
+                result.add(bestSingle);
+            }
+            return result;
         } catch (Exception e) {
+            log.warn("findAlternatives 失败: scheduleId={}", scheduleId, e);
             return Collections.emptyList();
         }
+    }
+
+    /** 同一行内，把按列号升序的可用座位切分成多个"列号连续"的可用块 */
+    private List<List<Seat>> splitConsecutiveRuns(List<Seat> rowSeats) {
+        List<List<Seat>> runs = new ArrayList<>();
+        List<Seat> cur = new ArrayList<>();
+        int prevCol = Integer.MIN_VALUE;
+        for (Seat s : rowSeats) {
+            int col = s.getColNum() != null ? s.getColNum() : 0;
+            if (!cur.isEmpty() && col - prevCol != 1) {
+                runs.add(cur);
+                cur = new ArrayList<>();
+            }
+            cur.add(s);
+            prevCol = col;
+        }
+        if (!cur.isEmpty()) {
+            runs.add(cur);
+        }
+        return runs;
+    }
+
+    /** 在连续块内取 need 张、列中心最靠近 targetCol 的子段（块不够长则整块返回） */
+    private List<Seat> bestWindow(List<Seat> run, int need, double targetCol) {
+        if (run.size() <= need) {
+            return run;
+        }
+        List<Seat> best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (int i = 0; i + need <= run.size(); i++) {
+            int left = run.get(i).getColNum();
+            int right = run.get(i + need - 1).getColNum();
+            double center = (left + right) / 2.0;
+            double dist = Math.abs(center - targetCol);
+            if (dist < bestDist - 1e-9) {
+                bestDist = dist;
+                best = run.subList(i, i + need);
+            }
+        }
+        return best != null ? best : run;
+    }
+
+    /** 替代座位转前端可用的 map（seatId 用字符串，避免雪花 ID 超出 JS 精度） */
+    private Map<String, Object> toAltMap(Seat s) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("seatId", String.valueOf(s.getId()));
+        map.put("seatLabel", s.getSeatLabel());
+        map.put("zone", s.getZone());
+        return map;
     }
 
     /**

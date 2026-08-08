@@ -2,6 +2,7 @@ package com.limou.agent.ai.movie.tools;
 
 import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatchService;
 import com.limou.agent.mapper.CinemaMapper;
 import com.limou.agent.mapper.HallMapper;
 import com.limou.agent.mapper.ScheduleMapper;
@@ -48,6 +49,9 @@ public class SearchSchedulesTool extends BaseTool {
     @Resource
     private ObjectMapper objectMapper;
 
+    @Resource
+    private FuzzyMatchService fuzzyMatchService;
+
     @Tool(description = "搜索放映场次，需传入影片ID。可选影院ID、日期、开始时间（HH:mm）、厅型、厅名。返回场次列表JSON，含影厅名、时间、价格、余座数")
     public String searchSchedules(
             @ToolParam(description = "影片ID（必填）") Long filmId,
@@ -66,6 +70,15 @@ public class SearchSchedulesTool extends BaseTool {
                     hallType = hallType.replaceAll("\\d+号|\\d+厅|厅$", "").trim();
                     if (hallType.isBlank()) hallType = null;
                     log.info("searchSchedules 兜底提取: hallName={}, hallType={}", hallName, hallType);
+                }
+            }
+
+            // ★ 厅型归一化：别名/拼音纠正（如"度比"→"杜比"、"巨目"→"巨幕"）
+            if (hallType != null && !hallType.isBlank()) {
+                String normalized = fuzzyMatchService.normalizeHallType(hallType);
+                if (normalized != null && !normalized.equalsIgnoreCase(hallType)) {
+                    log.info("searchSchedules 厅型纠错: '{}' -> '{}'", hallType, normalized);
+                    hallType = normalized;
                 }
             }
 
@@ -164,6 +177,10 @@ public class SearchSchedulesTool extends BaseTool {
                         matched = (dbType != null && (dbType.contains(input) || input.contains(dbType)))
                                 || (dbName != null && (dbName.contains(input) || input.contains(dbName)));
                     }
+                    // 拼音兜底：同音错字（如"巨目"→"巨幕"、"度比"→"杜比"）
+                    if (!matched) {
+                        matched = fuzzyMatchService.hallTypePinyinMatch(input, dbType, dbName);
+                    }
                     if (!matched) {
                         continue;
                     }
@@ -177,7 +194,8 @@ public class SearchSchedulesTool extends BaseTool {
                     if (dbName == null) {
                         continue;
                     }
-                    if (!hallNameMatches(input, dbName)) {
+                    // 保留原数字厅号边界匹配；拼音只作同音错字兜底（如"请侣厅"→"情侣厅"）
+                    if (!hallNameMatches(input, dbName) && !fuzzyMatchService.hallNamePinyinMatch(input, dbName)) {
                         continue;
                     }
                 }

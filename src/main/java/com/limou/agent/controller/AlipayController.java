@@ -1,31 +1,21 @@
 package com.limou.agent.controller;
 
 import com.limou.agent.config.AlipayConfig;
-import com.limou.agent.mq.OrderStatusNotifier;
 import com.limou.agent.model.entity.Order;
-import com.limou.agent.model.entity.OrderSeat;
 import com.limou.agent.model.enums.OrderStatusEnum;
-import com.limou.agent.model.entity.Seat;
 import com.limou.agent.service.AlipayService;
-import com.limou.agent.service.OrderSeatService;
 import com.limou.agent.service.OrderService;
-import com.limou.agent.service.SeatLockService;
-import com.limou.agent.service.SeatService;
-import com.limou.agent.service.TicketService;
 import com.mybatisflex.core.query.QueryWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDateTime;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -45,18 +35,6 @@ public class AlipayController {
     private OrderService orderService;
 
     @Autowired
-    private OrderSeatService orderSeatService;
-
-    @Autowired
-    private SeatService seatService;
-
-    @Autowired
-    private SeatLockService seatLockService;
-
-    @Autowired
-    private OrderStatusNotifier orderStatusNotifier;
-
-    @Autowired
     private AlipayConfig alipayConfig;
 
     /**
@@ -73,9 +51,6 @@ public class AlipayController {
                 ? returnUrl.substring(0, schemeEnd + 3 + pathStart)
                 : returnUrl;
     }
-
-    @Autowired
-    private TicketService ticketService;
 
     /**
      * 浏览器直接打开即可跳转支付宝沙箱收银台。
@@ -99,7 +74,6 @@ public class AlipayController {
      * 同步回调直接更新订单状态（不等异步通知），然后重定向到前端支付成功页。
      */
     @GetMapping("/return")
-    @Transactional(rollbackFor = Exception.class)
     public String returnPage(@RequestParam String out_trade_no,
             @RequestParam(required = false) String trade_no,
             @RequestParam(required = false) String total_amount) {
@@ -110,13 +84,19 @@ public class AlipayController {
                 return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
             }
 
-            // 异步通知可能已经处理过了，避免重复
-            if (!OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
-                handlePaymentSuccess(order, trade_no);
+            String status = order.getStatus();
+            // 仅待支付订单需处理支付成功；已支付（异步通知已处理）直接跳成功页；
+            // 已取消/已退款/已完成等一律不复活，跳回首页。
+            if (OrderStatusEnum.PENDING.getValue().equals(status)) {
+                orderService.handlePaymentSuccess(order, trade_no);
+            } else if (!OrderStatusEnum.PAID.getValue().equals(status)) {
+                log.warn("同步回调跳过非待支付订单: orderNo={}, status={}", out_trade_no, status);
+                return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
             }
 
             return "<script>window.location.replace('" + frontendBaseUrl() + "/payment-success/" + order.getId() + "');</script>";
         } catch (Exception e) {
+            // 事务已在 OrderService.handlePaymentSuccess 内回滚，这里只需返回失败跳转
             log.error("同步回调处理异常: out_trade_no={}", out_trade_no, e);
             return "<script>window.location.replace('" + frontendBaseUrl() + "');</script>";
         }
@@ -127,7 +107,6 @@ public class AlipayController {
      * 支付宝在用户支付完成后，会向 notifyUrl 发送 POST 请求。
      */
     @PostMapping("/notify")
-    @Transactional(rollbackFor = Exception.class)
     public String notify(HttpServletRequest request) {
         try {
             Map<String, String> params = new HashMap<>();
@@ -158,64 +137,23 @@ public class AlipayController {
                     return "failure";
                 }
 
-                if (OrderStatusEnum.PAID.getValue().equals(order.getStatus())) {
-                    log.info("订单已支付，忽略重复通知: {}", outTradeNo);
+                String status = order.getStatus();
+                // 仅待支付订单需处理支付成功；已支付忽略重复通知；
+                // 已取消/已退款/已完成等一律不复活，返回 success 停止支付宝重试。
+                if (!OrderStatusEnum.PENDING.getValue().equals(status)) {
+                    log.warn("异步通知跳过非待支付订单: orderNo={}, status={}", outTradeNo, status);
                     return "success";
                 }
 
-                handlePaymentSuccess(order, tradeNo);
+                orderService.handlePaymentSuccess(order, tradeNo);
                 log.info("支付宝异步通知处理成功，订单号: {}, 交易号: {}", outTradeNo, tradeNo);
             }
 
             return "success";
         } catch (Exception e) {
+            // 事务已在 OrderService.handlePaymentSuccess 内回滚，返回 failure 让支付宝重试
             log.error("支付宝异步通知处理异常", e);
             return "failure";
-        }
-    }
-
-    /**
-     * 支付成功通用处理：更新订单状态 + 座位标记已售 + 清理 Redis 锁。
-     */
-    private void handlePaymentSuccess(Order order, String tradeNo) {
-        log.info("[handlePaymentSuccess] 进入, orderId={}, tradeNo={}, scheduleId={}", order.getId(), tradeNo, order.getScheduleId());
-        try {
-            order.setStatus(OrderStatusEnum.PAID.getValue());
-            order.setPaidAt(LocalDateTime.now());
-            order.setAlipayTradeNo(tradeNo);
-            order.setAlipayStatus("TRADE_SUCCESS");
-            orderService.updateById(order);
-            log.info("[handlePaymentSuccess] 订单已置为已支付, orderId={}", order.getId());
-
-            // 更新座位为已售
-            QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
-            List<OrderSeat> orderSeats = orderSeatService.list(sqw);
-            log.info("[handlePaymentSuccess] 查询到订单座位关联 {} 条, orderId={}", orderSeats.size(), order.getId());
-            List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).toList();
-            if (!seatIds.isEmpty()) {
-                List<Seat> seats = seatService.listByIds(seatIds);
-                log.info("[handlePaymentSuccess] 查询到座位 {} 个, orderId={}, seatIds={}", seats.size(), order.getId(), seatIds);
-                seats.forEach(s -> s.setStatus("sold"));
-                seatService.updateBatch(seats);
-
-                // 支付成功才生成票：每座位一张（独立 8 位取票码）；幂等避免重复生成
-                ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
-                log.info("[handlePaymentSuccess] createTickets 已调用完成, orderId={}", order.getId());
-
-                // 清理 Redis 锁集合
-                seatLockService.releaseSeats(order.getScheduleId(), seatIds);
-                log.info("[handlePaymentSuccess] Redis 锁已释放, orderId={}", order.getId());
-            } else {
-                log.warn("[handlePaymentSuccess] 订单无座位关联, 跳过生成票! orderId={}", order.getId());
-            }
-
-            // 通过 SSE 推送通知前端
-            orderStatusNotifier.notifyOrderPaid(order.getUserId(), order.getId());
-            log.info("订单 {} 支付成功 SSE 已推送", order.getId());
-        } catch (Exception e) {
-            // 即使异常被 notify 的 try-catch 吞掉，也要落盘完整堆栈便于排查
-            log.error("[handlePaymentSuccess] 处理异常, orderId={}, tradeNo={}", order.getId(), tradeNo, e);
-            throw e;
         }
     }
 }

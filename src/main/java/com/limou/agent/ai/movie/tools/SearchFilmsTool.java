@@ -4,6 +4,8 @@ import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatch;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatchService;
 import com.limou.agent.mapper.FilmMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
 import com.limou.agent.model.entity.Film;
@@ -38,6 +40,9 @@ public class SearchFilmsTool extends BaseTool {
 
     @Resource
     private MovieStateManager stateManager;
+
+    @Resource
+    private FuzzyMatchService fuzzyMatchService;
 
     @Tool(description = "搜索影片，支持按名称关键词和影片类型筛选。返回影片列表JSON，包含影片ID、名称、类型、评分、时长、海报、简介。最多返回5部，推荐时向用户展示3-5部即可，不要全部列出")
     public String searchFilms(
@@ -88,6 +93,22 @@ public class SearchFilmsTool extends BaseTool {
                 films = filmMapper.selectListByQuery(wrapper);
             }
 
+            // ★ 模糊纠错：SQL like 查空且有关键词时，降级拼音/别名匹配
+            // （支柱下 → 蜘蛛侠·崭新之日；"蜘蛛侠" → "蜘蛛侠·崭新之日"）
+            FuzzyMatch fuzzyHit = null;
+            if (films.isEmpty() && keyword != null && !keyword.isBlank()) {
+                java.util.Optional<FuzzyMatch> fm = fuzzyMatchService.matchFilm(keyword);
+                if (fm.isPresent() && fm.get().matchedId() != null) {
+                    Film matched = filmMapper.selectOneById(fm.get().matchedId());
+                    if (matched != null) {
+                        films = java.util.List.of(matched);
+                        fuzzyHit = fm.get();
+                        log.info("SearchFilms 模糊纠错: '{}' -> '{}' (置信度 {}, source {})",
+                                keyword, fuzzyHit.matchedName(), fuzzyHit.confidence(), fuzzyHit.source());
+                    }
+                }
+            }
+
             List<Map<String, Object>> filmList = films.stream().map(f -> {
                 Map<String, Object> map = new HashMap<>();
                 map.put("filmId", f.getId());
@@ -107,6 +128,12 @@ public class SearchFilmsTool extends BaseTool {
             Map<String, Object> result = new HashMap<>();
             result.put("films", filmList);
             result.put("total", filmList.size());
+            // 模糊纠错信息（前端/LLM 可选展示；不影响既有结构）
+            if (fuzzyHit != null) {
+                result.put("correctedName", fuzzyHit.matchedName());
+                result.put("fuzzy", true);
+                result.put("fuzzyConfidence", fuzzyHit.confidence());
+            }
 
             // ★ ReAct 模式下写回 filmId 到 ConversationState，确保下一轮 Graph 有上下文
             String convId = ConversationContext.get();

@@ -120,6 +120,12 @@ public class SmartMovieRouter {
             return SmartRouteResult.graph(directIntent("search_movie"));
         }
 
+        // ★ 包场/全包 → GRAPH 确定性锁座下单（LockSeatsNode 自动选全场所有可用座位）
+        if (message.contains("包场") || message.contains("全包") || message.contains("整个厅")) {
+            log.info("Router: 规则命中 包场 → GRAPH (全场锁座下单)");
+            return SmartRouteResult.graph(null);
+        }
+
         // ★ 已有上下文 → 强制 Graph（维护多轮对话状态）
         if (hasExistingContext(state)) {
             log.info("Router: 已有上下文(film={}, cinema={}, schedule={}) → GRAPH",

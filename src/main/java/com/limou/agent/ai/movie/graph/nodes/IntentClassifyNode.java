@@ -80,7 +80,8 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
         stateManager.saveState(state.getConversationId(), convState);
 
         // ★ 智能重定向：缺失前置条件时自动降级意图
-        String resolvedIntent = resolveIntent(intentResult.getIntent(), convState, state.getConversationId());
+        String resolvedIntent = resolveIntent(intentResult.getIntent(), convState,
+                state.getConversationId(), state.getUserMessage());
         if (!resolvedIntent.equals(intentResult.getIntent())) {
             log.info("IntentClassify 重定向: {} -> {} (conversationId={})",
                     intentResult.getIntent(), resolvedIntent, state.getConversationId());
@@ -97,19 +98,24 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
      * 智能重定向：当用户意图需要的前置条件不满足时，自动降级到上一步。
      * <pre>
      *   get_seat_map 缺 scheduleId → search_schedule（有 filmId 时）
-     *   lock_seats   缺 seatIds   → get_seat_map（有 scheduleId 时）
-     *   create_order 缺 seatIds   → lock_seats（有 scheduleId + seatIds in state 时保持 create_order 由 LLM 处理）
+     *   lock_seats   缺 seatIds   → get_seat_map（无偏好/委托时，展示座位图）
+     *   create_order 缺 seatIds   → lock_seats（有偏好/委托）或 get_seat_map（只报票数时）
      * </pre>
+     * <p>
+     * ★ 自动选座闸门：只有用户明确表达选座偏好（中间/靠前/全场等）或明确委托 AI 选座/下单
+     * （"帮我选""直接下单""就按你推荐的"等）才允许保留/升级为 lock_seats 并自动选座+下单。
+     * 只报票数（如"两位""两张"）没让 AI 选座 → 降级 get_seat_map 展示座位图（回复里追问选座偏好），
+     * 避免"什么都没说就擅自锁座下单"。
      */
-    private String resolveIntent(String intent, ConversationState state, String conversationId) {
+    private String resolveIntent(String intent, ConversationState state, String conversationId, String userMessage) {
         return switch (intent) {
             case "get_seat_map" -> {
                 if (state.getScheduleId() == null && state.getFilmId() != null) {
                     yield "search_schedule";
                 }
-                // 用户明确要"买X张票/要X个座位"（有票数或选座偏好）→ 直接自动锁座下单，而非只展示座位图
-                if ((state.getTicketCount() != null && state.getTicketCount() > 0)
-                        || has(state.getPreferredSeatZone())) {
+                // 用户明确要求自动选座（有选座偏好或消息明确委托）→ 升级为 lock_seats 自动锁座下单；
+                // 只报了票数（如"两位"）→ 保持 get_seat_map 展示座位图，让用户自己选/回复里追问偏好
+                if (state.canAutoPickSeats(userMessage)) {
                     yield "lock_seats";
                 }
                 yield intent;
@@ -122,21 +128,21 @@ public class IntentClassifyNode implements GraphNode<MovieGraphState> {
                 yield intent;
             }
             case "lock_seats" -> {
-                // 缺座位且未表达选座偏好（中间/靠前等）与票数 → 降级展示座位图让用户手动选
-                // 有选座偏好或票数（如"帮我选中间3个座位"）→ 保留 lock_seats，由节点自动选座
+                // 缺座位且不允许自动选座（无偏好、也没明确让 AI 选座）→ 降级展示座位图让用户手动选
+                // （"帮我选中间3个座位"/"帮我买两张"等有偏好或明确委托 → 保留 lock_seats 自动选座）
                 if ((state.getSeatIds() == null || state.getSeatIds().isEmpty())
                         && state.getScheduleId() != null
-                        && !has(state.getPreferredSeatZone())
-                        && state.getTicketCount() == null) {
+                        && !state.canAutoPickSeats(userMessage)) {
                     yield "get_seat_map";
                 }
                 yield intent;
             }
             case "create_order" -> {
-                // 座位未锁定但已有场次 → 先锁座（有偏好/票数则自动选座），锁座成功条件边会自动下单
+                // 座位未锁定但已有场次 → 用户明确让 AI 选座（偏好/委托）→ 先 lock_seats 自动选座，锁座成功条件边会自动下单；
+                // 只报票数没让 AI 选座 → 降级 get_seat_map 展示座位图，避免"什么都没说就擅自锁座下单"
                 if ((state.getSeatIds() == null || state.getSeatIds().isEmpty())
                         && state.getScheduleId() != null) {
-                    yield "lock_seats";
+                    yield state.canAutoPickSeats(userMessage) ? "lock_seats" : "get_seat_map";
                 }
                 yield intent;
             }

@@ -4,6 +4,8 @@ import cn.hutool.json.JSONObject;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.limou.agent.ai.movie.ConversationContext;
 import com.limou.agent.ai.movie.MovieStateManager;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatch;
+import com.limou.agent.ai.movie.fuzzy.FuzzyMatchService;
 import com.limou.agent.mapper.CinemaMapper;
 import com.limou.agent.mapper.ScheduleMapper;
 import com.limou.agent.model.dto.movie.ConversationState;
@@ -39,6 +41,9 @@ public class SearchCinemasTool extends BaseTool {
     @Resource
     private MovieStateManager stateManager;
 
+    @Resource
+    private FuzzyMatchService fuzzyMatchService;
+
     @Tool(description = "搜索影院，支持按名称关键词和城市筛选。可传入filmId查找有该片排片的影院。返回影院列表JSON")
     public String searchCinemas(
             @ToolParam(description = "影院名称关键词（可选）") String keyword,
@@ -47,6 +52,8 @@ public class SearchCinemasTool extends BaseTool {
     ) {
         try {
             List<Cinema> cinemas;
+            // 模糊纠错命中（SQL like 查空时的拼音/别名兜底）
+            FuzzyMatch fuzzyHit = null;
 
             if (filmId != null) {
                 // 通过排片表查找有该影片的影院ID
@@ -77,6 +84,19 @@ public class SearchCinemasTool extends BaseTool {
                 }
 
                 cinemas = cinemaMapper.selectListByQuery(cinemaWrapper);
+                // ★ 模糊纠错：该片排影院子集内拼音兜底（如"耀莱"→洛阳耀莱成龙国际影城）
+                if (cinemas.isEmpty() && keyword != null && !keyword.isBlank()) {
+                    java.util.Optional<FuzzyMatch> fm = fuzzyMatchService.matchCinemaWithin(cinemaIds, keyword);
+                    if (fm.isPresent() && fm.get().matchedId() != null) {
+                        Cinema matched = cinemaMapper.selectOneById(fm.get().matchedId());
+                        if (matched != null) {
+                            cinemas = java.util.List.of(matched);
+                            fuzzyHit = fm.get();
+                            log.info("SearchCinemas 模糊纠错(按片排片子集): '{}' -> '{}' (置信度 {}, source {})",
+                                    keyword, fuzzyHit.matchedName(), fuzzyHit.confidence(), fuzzyHit.source());
+                        }
+                    }
+                }
             } else {
                 QueryWrapper wrapper = QueryWrapper.create()
                         .eq(Cinema::getStatus, "published");
@@ -90,6 +110,19 @@ public class SearchCinemasTool extends BaseTool {
 
                 wrapper.limit(20);
                 cinemas = cinemaMapper.selectListByQuery(wrapper);
+                // ★ 模糊纠错：全部已发布影院拼音/别名兜底（如"耀莱"→洛阳耀莱成龙国际影城）
+                if (cinemas.isEmpty() && keyword != null && !keyword.isBlank()) {
+                    java.util.Optional<FuzzyMatch> fm = fuzzyMatchService.matchCinema(keyword);
+                    if (fm.isPresent() && fm.get().matchedId() != null) {
+                        Cinema matched = cinemaMapper.selectOneById(fm.get().matchedId());
+                        if (matched != null) {
+                            cinemas = java.util.List.of(matched);
+                            fuzzyHit = fm.get();
+                            log.info("SearchCinemas 模糊纠错: '{}' -> '{}' (置信度 {}, source {})",
+                                    keyword, fuzzyHit.matchedName(), fuzzyHit.confidence(), fuzzyHit.source());
+                        }
+                    }
+                }
             }
 
             List<Map<String, Object>> cinemaList = cinemas.stream().map(c -> {
@@ -108,6 +141,12 @@ public class SearchCinemasTool extends BaseTool {
             Map<String, Object> result = new HashMap<>();
             result.put("cinemas", cinemaList);
             result.put("total", cinemaList.size());
+            // 模糊纠错信息（可选展示；不影响既有结构）
+            if (fuzzyHit != null) {
+                result.put("correctedName", fuzzyHit.matchedName());
+                result.put("fuzzy", true);
+                result.put("fuzzyConfidence", fuzzyHit.confidence());
+            }
 
             // ★ ReAct 模式下写回 cinemaId 到 ConversationState
             String convId = ConversationContext.get();

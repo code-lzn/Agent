@@ -39,21 +39,42 @@ public class GraphIntentClassifier {
             - 地点/地标名（大学/广场/火车站/景区→search_nearby，location 填地点名）
             - 影院品牌名（万达/万达影城/CGV→search_cinema，cinemaName 填影院名）
             - 只有出现"买/订/下单/选座/要X张票"才识别为 lock_seats/create_order
+            - **只报票数不选座**（如"两位""两张""要2张"），用户没让 AI 选座也没说坐哪 → 识别为 get_seat_map（展示座位图），让用户自己选或下一步说偏好；**不要**识别为 lock_seats/create_order
+            - 用户说"包场/全包/包下整个厅/全场" → lock_seats，preferredSeatZone 填 "全场"（系统自动锁全场所有可用座位，ticketCount 填 null）
             - 用户有 orderId 后问"看看订单/订单状态"→query_order
             - 时段换算：上午→09:00 中午→12:00 下午→14:00 晚上→19:00
             - 用户说"都帮我选/全都要/两个都"表示多部影片，filmName 填逗号分隔
 
-            ## 槽位（有则填，无则 null）
-            filmName, cinemaName, location, hallType, showDate(yyyy-MM-dd), startTime(HH:mm),
-            ticketCount(整数), seatLabels[], scheduleId, orderId, preferredSeatZone(中间/靠前/靠后)
+            ## 槽位提取规则
+            从用户输入中提取以下字段，有则填，无则 null：
+            - filmName: 影片名称
+            - filmType: 影片类型
+            - cinemaName: 影院名称（仅当用户明确说影院品牌名时才填，地点名不要填这里）
 
-            ## 当前时间
-            今天是 {today}
+            ## 错别字/音近词处理（重要）
+            用户可能输入错别字或音近词（如"支柱下"实指"蜘蛛侠"、"巨目"实指"巨幕"、"耀莱"实指"耀莱成龙国际影城"）。
+            **仍然按用户原词提取到对应槽位**（filmName/cinemaName/hallType），不要因为名字怪异就漏提或归为 unknown。纠错由搜索工具自动完成。
+            - location: 地理位置描述（仅 search_nearby 意图填写）。提取用户想去的地点/地标/机构名，如"河南科技大学"、"万达广场"、"北京西站"。用户只说"附近"且无具体地点时填 null（工具会用城市名定位）
+            - hallType: 厅型（IMAX/杜比/VIP 等）
+            - showDate: 日期 yyyy-MM-dd
+            - startTime: 时间 HH:mm
+            - ticketCount: 票数（整数）
+            - seatLabels: 座位标签数组，如 ["5排6座"]
+            - scheduleId: 场次ID（整数）
+            - orderId: 订单ID（整数）
+            - preferredSeatZone: 偏好座位区域（中间/靠前/靠后/全场）
 
-            ## 对话状态
+            ## 选择动作与时段识别（重要）
+            - 用户说"选X厅/选X影院/选第几个/就选这个/那个/确认/可以"等选择或确认动作时，务必提取 hallType/hallName/cinemaName，意图识别为 get_seat_map 或 lock_seats
+            - "上午/中午/下午/晚上/凌晨"等时段词，换算成 startTime 填入（上午→09:00，中午→12:00，下午→14:00，晚上→19:00），供场次时间过滤
+
+            ## 当前日期
+            今天是：{today}（含星期）。用户提到"今天/明天/后天/某月某日/周几/几点/下午/晚上"等相对时间时，据此换算成具体日期填入 showDate/startTime。
+
+            ## 当前对话状态
             {state}
 
-            ## 只输出 JSON（不要 markdown）
+            ## 输出格式（严格JSON，不要markdown包裹）
             {"intent":"search_movie","slots":{"filmName":"流浪地球3","hallType":"IMAX"},"askPrompt":null}
 
             ## 用户输入
