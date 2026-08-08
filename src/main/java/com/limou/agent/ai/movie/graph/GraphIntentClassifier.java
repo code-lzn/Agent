@@ -75,7 +75,7 @@ public class GraphIntentClassifier {
             {state}
 
             ## 输出格式（严格JSON，不要markdown包裹）
-            {"intent":"search_movie","slots":{"filmName":"流浪地球3","hallType":"IMAX"},"askPrompt":null}
+            {"intent":"search_movie","slots":{"filmName":"影片名","hallType":"IMAX"},"askPrompt":null}
 
             ## 用户输入
             {input}
@@ -90,7 +90,8 @@ public class GraphIntentClassifier {
     private ChatClient chatClient;
 
     /**
-     * 意图分类结果缓存 —— 按 "消息摘要:状态摘要" 缓存，避免相同输入重复调用 LLM
+     * 意图分类结果缓存 —— 按 "conversationId:消息摘要:状态摘要" 缓存，避免相同输入重复调用 LLM
+     * ★ 修复：key 含 conversationId，防止跨会话串数据
      * 过期策略：写入后 5 分钟过期，最多 2000 条
      */
 //    private final Cache<String, GraphIntentResult> intentCache = Caffeine.newBuilder()
@@ -108,8 +109,8 @@ public class GraphIntentClassifier {
      * 意图识别 + 槽位提取
      */
     public GraphIntentResult classify(String userMessage, ConversationState currentState) {
-        // ★ 优化1：缓存命中直接返回，跳过 LLM 调用
-//        String cacheKey = buildCacheKey(userMessage, currentState);
+        // ★ 优化1：缓存命中直接返回，跳过 LLM 调用（key 含 conversationId，不会跨会话串数据）
+        String cacheKey = buildCacheKey(userMessage, currentState);
 //        GraphIntentResult cached = intentCache.getIfPresent(cacheKey);
 //        if (cached != null) {
 //            log.debug("Graph Intent 缓存命中: key={}", cacheKey);
@@ -130,7 +131,7 @@ public class GraphIntentClassifier {
                     .user(prompt)
 //                    .options(options -> options
 //                            .maxOutputTokens(256)    // 意图 JSON 很小，不需要默认的 4096
-//                            .temperature(0.0))        // 分类任务不需要随机性
+//                            .temperature(0.0))        // 分类任务不需要随机性，避免幻觉
                     .call()
                     .content();
             String json = cleanJson(raw);
@@ -173,8 +174,7 @@ public class GraphIntentClassifier {
                 if (slotsMap.get("preferredSeatZone") != null)
                     slots.setPreferredSeatZone((String) slotsMap.get("preferredSeatZone"));
             }
-//, cacheKey, cacheKey={}
-            log.info("Graph Intent: intent={}, slots={}", intent, slots);
+            log.info("Graph Intent: intent={}, slots={}, cacheKey={}", intent, slots, cacheKey);
             GraphIntentResult intentResult = GraphIntentResult.builder()
                     .intent(intent)
                     .slots(slots)
@@ -197,21 +197,22 @@ public class GraphIntentClassifier {
     }
 
     /**
-     * 构建缓存 key：消息摘要 + 关键槽位变化
-     * 注意：不含时间（today），同一消息不同秒数应命中缓存
+     * 构建缓存 key：conversationId + 消息摘要 + 关键槽位变化
+     * ★ 修复：key 含 conversationId（取自 state），防止跨会话缓存串数据
      */
-//    private String buildCacheKey(String userMessage, ConversationState state) {
-//        String msg = userMessage != null ? userMessage.trim() : "";
-//        String stateKey = "";
-//        if (state != null) {
-//            // 只用影响意图的关键字段
-//            stateKey = (state.getFilmId() != null ? "f" + state.getFilmId() : "")
-//                    + (state.getCinemaId() != null ? "c" + state.getCinemaId() : "")
-//                    + (state.getScheduleId() != null ? "s" + state.getScheduleId() : "")
-//                    + (state.getOrderId() != null ? "o" + state.getOrderId() : "");
-//        }
-//        return msg.hashCode() + ":" + stateKey;
-//    }
+    private String buildCacheKey(String userMessage, ConversationState state) {
+        String convId = state != null && state.getConversationId() != null
+                ? state.getConversationId() : "no-session";
+        String msg = userMessage != null ? userMessage.trim() : "";
+        String stateKey = "";
+        if (state != null) {
+            stateKey = (state.getFilmId() != null ? "f" + state.getFilmId() : "")
+                    + (state.getCinemaId() != null ? "c" + state.getCinemaId() : "")
+                    + (state.getScheduleId() != null ? "s" + state.getScheduleId() : "")
+                    + (state.getOrderId() != null ? "o" + state.getOrderId() : "");
+        }
+        return convId + ":" + msg.hashCode() + ":" + stateKey;
+    }
 
     private String cleanJson(String raw) {
         if (raw == null || raw.isBlank()) return "{}";
