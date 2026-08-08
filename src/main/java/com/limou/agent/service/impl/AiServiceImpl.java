@@ -123,29 +123,43 @@ public class AiServiceImpl implements AiService {
                 + "当前登录用户ID: " + userId + "\n"
                 + "调用 createOrder 和 getUserPreference 时必须使用此 userId，禁止使用其他值。";
 
-        // ★ ReAct 前用意图分类器提取槽位写回状态（ReAct 工具调用不写全票数/座位偏好等，
-        //   需提前写入，保证下一轮 Graph（如"帮我下单"）能接力拿到 cinemaId/scheduleId/ticketCount）
-        try {
-            GraphIntentResult intentResult = intentClassifier.classify(
-                    message, movieStateManager.getState(conversationId));
-            if (intentResult.getSlots() != null) {
-                movieStateManager.mergeState(conversationId, intentResult.getSlots());
-                log.info("ReAct 前置槽位写回: conversationId={}, intent={}",
-                        conversationId, intentResult.getIntent());
+        // ★ tool_start 更新指示器 + status 在气泡内显示文字，两者同时展示
+        Flux<ServerSentEvent<String>> thinkingFlux = Flux.just(
+                ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of(
+                                "d", "正在分析您的需求...",
+                                "type", "status")))
+                        .build(),
+                ServerSentEvent.<String>builder()
+                        .data(JSONUtil.toJsonStr(Map.of(
+                                "d", "正在分析您的需求...",
+                                "type", "tool_start",
+                                "toolName", "意图识别")))
+                        .build()
+               );
+
+        // ★ 意图分类 + ReAct 主流程延迟到订阅时执行，确保 thinking 事件先发送
+        Flux<ServerSentEvent<String>> mainFlux = Flux.defer(() -> {
+            // ★ ReAct 前用意图分类器提取槽位写回状态
+            try {
+                GraphIntentResult intentResult = intentClassifier.classify(
+                        message, movieStateManager.getState(conversationId));
+                if (intentResult.getSlots() != null) {
+                    movieStateManager.mergeState(conversationId, intentResult.getSlots());
+                    log.info("ReAct 前置槽位写回: conversationId={}, intent={}",
+                            conversationId, intentResult.getIntent());
+                }
+            } catch (Exception e) {
+                log.warn("ReAct 前置槽位提取失败: conversationId={}", conversationId, e);
             }
-        } catch (Exception e) {
-            log.warn("ReAct 前置槽位提取失败: conversationId={}", conversationId, e);
-        }
 
-        StringBuilder fullResponse = new StringBuilder();
-        // ★ 捕获本回合所有卡片用于持久化（REACT 可能连下多单 → 每单一张卡，全部保存）
-        //   List 容器累积，Lambda 内只做变异、不重新赋值（effectively-final）
-        final List<Map<String, Object>> emittedCards = new ArrayList<>();
+            StringBuilder fullResponse = new StringBuilder();
+            final List<Map<String, Object>> emittedCards = new ArrayList<>();
 
-        return aiCodeGeneratorFactory.doAgentChatStream(
-                        message, conversationId, prompt,
-                        movieToolCallbacks, movieToolManager.getToolDisplayNames(), "movie-agent")
-                .map(chunk -> {
+            return aiCodeGeneratorFactory.doAgentChatStream(
+                            message, conversationId, prompt,
+                            movieToolCallbacks, movieToolManager.getToolDisplayNames(), "movie-agent")
+                    .map(chunk -> {
                     if ("tool_start".equals(chunk.type())) {
                         String msg = "正在" + chunk.toolDisplayName() + "...";
                         return ServerSentEvent.<String>builder()
@@ -208,6 +222,9 @@ public class AiServiceImpl implements AiService {
                     movieStateManager.refreshTtl(conversationId);
                     ConversationContext.clear();
                 });
+        }); // Flux.defer 结束
+
+        return Flux.concat(thinkingFlux, mainFlux);
     }
 
     // ---- Graph 模式 ----
@@ -362,12 +379,6 @@ public class AiServiceImpl implements AiService {
             Double lat, Double lng) {
         String normalizedCity = normalizeCity(currentCity);
 
-        ServerSentEvent<String> initialStatus = ServerSentEvent.<String>builder()
-                .data(JSONUtil.toJsonStr(Map.of(
-                        "d", "正在理解你的需求",
-                        "type", "status")))
-                .build();
-
         Flux<ServerSentEvent<String>> routedStream = Mono.fromCallable(() -> {
                     ConversationState state = movieStateManager.getState(conversationId);
                     if (userId != null) state.setUserId(userId);
@@ -383,7 +394,7 @@ public class AiServiceImpl implements AiService {
                 .flatMapMany(route -> routeStream(
                         route, message, conversationId, userId, normalizedCity));
 
-        return Flux.concat(Flux.just(initialStatus), routedStream).onErrorResume(e -> {
+        return routedStream.onErrorResume(e -> {
             log.error("SmartStream 异常: conversationId={}", conversationId, e);
             return Flux.just(
                     ServerSentEvent.<String>builder()
