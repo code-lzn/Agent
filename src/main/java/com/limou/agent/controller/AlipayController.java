@@ -178,27 +178,44 @@ public class AlipayController {
      * 支付成功通用处理：更新订单状态 + 座位标记已售 + 清理 Redis 锁。
      */
     private void handlePaymentSuccess(Order order, String tradeNo) {
-        order.setStatus(OrderStatusEnum.PAID.getValue());
-        order.setPaidAt(LocalDateTime.now());
-        order.setAlipayTradeNo(tradeNo);
-        order.setAlipayStatus("TRADE_SUCCESS");
-        orderService.updateById(order);
+        log.info("[handlePaymentSuccess] 进入, orderId={}, tradeNo={}, scheduleId={}", order.getId(), tradeNo, order.getScheduleId());
+        try {
+            order.setStatus(OrderStatusEnum.PAID.getValue());
+            order.setPaidAt(LocalDateTime.now());
+            order.setAlipayTradeNo(tradeNo);
+            order.setAlipayStatus("TRADE_SUCCESS");
+            orderService.updateById(order);
+            log.info("[handlePaymentSuccess] 订单已置为已支付, orderId={}", order.getId());
 
-        // 更新座位为已售
-        QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
-        List<OrderSeat> orderSeats = orderSeatService.list(sqw);
-        List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).toList();
-        if (!seatIds.isEmpty()) {
-            List<Seat> seats = seatService.listByIds(seatIds);
-            seats.forEach(s -> s.setStatus("sold"));
-            seatService.updateBatch(seats);
+            // 更新座位为已售
+            QueryWrapper sqw = QueryWrapper.create().eq("orderId", order.getId());
+            List<OrderSeat> orderSeats = orderSeatService.list(sqw);
+            log.info("[handlePaymentSuccess] 查询到订单座位关联 {} 条, orderId={}", orderSeats.size(), order.getId());
+            List<Long> seatIds = orderSeats.stream().map(OrderSeat::getSeatId).toList();
+            if (!seatIds.isEmpty()) {
+                List<Seat> seats = seatService.listByIds(seatIds);
+                log.info("[handlePaymentSuccess] 查询到座位 {} 个, orderId={}, seatIds={}", seats.size(), order.getId(), seatIds);
+                seats.forEach(s -> s.setStatus("sold"));
+                seatService.updateBatch(seats);
 
-            // 清理 Redis 锁集合
-            seatLockService.releaseSeats(order.getScheduleId(), seatIds);
+                // 支付成功才生成票：每座位一张（独立 8 位取票码）；幂等避免重复生成
+                ticketService.createTickets(order.getId(), order.getScheduleId(), seats);
+                log.info("[handlePaymentSuccess] createTickets 已调用完成, orderId={}", order.getId());
+
+                // 清理 Redis 锁集合
+                seatLockService.releaseSeats(order.getScheduleId(), seatIds);
+                log.info("[handlePaymentSuccess] Redis 锁已释放, orderId={}", order.getId());
+            } else {
+                log.warn("[handlePaymentSuccess] 订单无座位关联, 跳过生成票! orderId={}", order.getId());
+            }
+
+            // 通过 SSE 推送通知前端
+            orderStatusNotifier.notifyOrderPaid(order.getUserId(), order.getId());
+            log.info("订单 {} 支付成功 SSE 已推送", order.getId());
+        } catch (Exception e) {
+            // 即使异常被 notify 的 try-catch 吞掉，也要落盘完整堆栈便于排查
+            log.error("[handlePaymentSuccess] 处理异常, orderId={}, tradeNo={}", order.getId(), tradeNo, e);
+            throw e;
         }
-
-        // 通过 SSE 推送通知前端
-        orderStatusNotifier.notifyOrderPaid(order.getUserId(), order.getId());
-        log.info("订单 {} 支付成功 SSE 已推送", order.getId());
     }
 }
