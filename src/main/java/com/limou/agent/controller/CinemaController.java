@@ -26,7 +26,8 @@ import com.limou.agent.service.CinemaService;
 import org.springframework.web.bind.annotation.RestController;
 import java.math.BigDecimal;
 import org.springframework.web.bind.annotation.RequestParam;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  *  控制层。
@@ -152,6 +153,74 @@ public class CinemaController {
     @GetMapping("page")
     public BaseResponse<Page<Cinema>> page(Page<Cinema> page) {
         return ResultUtils.success(cinemaService.page(page));
+    }
+
+    /**
+     * 查询距离用户最近且有排片的 N 家影院（默认 3 家），可排除指定影院。
+     * 使用 Haversine 公式计算直线距离，无需调用高德 API。
+     *
+     * @param userLat   用户纬度
+     * @param userLng   用户经度
+     * @param excludeId 需排除的影院 ID（可选）
+     * @param limit     返回数量（可选，默认 3）
+     * @return 有排片的最近影院列表，含 id / name / address / distance
+     */
+    @GetMapping("nearby")
+    public BaseResponse<List<Map<String, Object>>> nearby(
+            @RequestParam BigDecimal userLat,
+            @RequestParam BigDecimal userLng,
+            @RequestParam(required = false) Long excludeId,
+            @RequestParam(defaultValue = "3") int limit) {
+
+        // 1. 查出今天及之后有排片的影院 ID 集合
+        Set<Long> activeCinemaIds = scheduleService.list(
+                QueryWrapper.create()
+                        .select("DISTINCT cinemaId")
+                        .eq("status", "published")
+                        .ge("showDate", java.sql.Date.valueOf(LocalDate.now()))
+        ).stream()
+                .map(s -> s.getCinemaId())
+                .collect(Collectors.toSet());
+
+        // 2. 选出有排片 + 有坐标 + 排除自身 的影院，算距离
+        double lat = userLat.doubleValue();
+        double lng = userLng.doubleValue();
+
+        List<Map<String, Object>> result = cinemaService.list().stream()
+                .filter(c -> c.getLatitude() != null && c.getLongitude() != null)
+                .filter(c -> activeCinemaIds.contains(c.getId()))
+                .filter(c -> excludeId == null || !excludeId.equals(c.getId()))
+                .map(c -> {
+                    int distMeters = haversineDistance(lat, lng,
+                            c.getLatitude().doubleValue(), c.getLongitude().doubleValue());
+                    String distStr = distMeters < 1000
+                            ? distMeters + "m"
+                            : String.format("%.1fkm", distMeters / 1000.0);
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", c.getId().toString());
+                    m.put("name", c.getName());
+                    m.put("address", c.getAddress());
+                    m.put("distance", distStr);
+                    m.put("distMeters", distMeters);
+                    return m;
+                })
+                .sorted(Comparator.comparingInt(m -> (int) m.get("distMeters")))
+                .limit(limit)
+                .collect(Collectors.toList());
+
+        return ResultUtils.success(result);
+    }
+
+    /** Haversine 公式计算两点间直线距离（米） */
+    private static int haversineDistance(double lat1, double lng1, double lat2, double lng2) {
+        final double R = 6371000;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return (int) Math.round(R * c);
     }
 
 }

@@ -35,7 +35,7 @@ public class OrderTimeoutConfig {
     /** 订单超时时间（毫秒），默认 15 分钟 */
 //    public static final int ORDER_TIMEOUT_MS = 15 * 60 * 1000;
             //测试
-        public static final int ORDER_TIMEOUT_MS = 2*60*1000;
+        public static final int ORDER_TIMEOUT_MS = 5*60*1000;
 
     // ==================== 延时队列交换机 ====================
 

@@ -5,10 +5,14 @@ import com.limou.agent.common.ResultUtils;
 import com.limou.agent.exception.ErrorCode;
 import com.limou.agent.exception.ThrowUtils;
 import com.limou.agent.model.dto.schedule.ConflictCheckRequest;
+import com.limou.agent.model.entity.Cinema;
 import com.limou.agent.model.entity.Film;
 import com.limou.agent.model.vo.ScheduleVO;
 import cn.hutool.core.collection.CollUtil;
+import com.limou.agent.service.CinemaService;
+import com.limou.agent.service.FilmService;
 import com.mybatisflex.core.paginate.Page;
+import com.mybatisflex.core.query.QueryWrapper;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.limou.agent.model.entity.Schedule;
@@ -16,7 +20,8 @@ import com.limou.agent.service.ScheduleService;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.sql.Date;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 排期 控制层。
@@ -29,6 +34,12 @@ public class ScheduleController {
 
     @Autowired
     private ScheduleService scheduleService;
+
+    @Autowired
+    private CinemaService cinemaService;
+
+    @Autowired
+    private FilmService filmService;
 
     // ========== 前台接口 ==========
 
@@ -44,6 +55,68 @@ public class ScheduleController {
                 ErrorCode.PARAMS_ERROR, "影片ID和影院ID不能同时为空");
         List<ScheduleVO> list = scheduleService.queryScheduleList(filmId, cinemaId, showDate);
         return ResultUtils.success(list);
+    }
+
+    /**
+     * 查询指定日期有排片的影院及其影片（排除指定影片）。
+     * 用于当前影片无排片时，推荐同日期其他有场次的影片。
+     */
+    @GetMapping("/other-films")
+    public BaseResponse<List<Map<String, Object>>> otherFilmsByDate(
+            @RequestParam Date showDate,
+            @RequestParam Long excludeFilmId) {
+        List<Schedule> schedules = scheduleService.list(
+                QueryWrapper.create()
+                        .eq("status", "published")
+                        .eq("showDate", showDate)
+                        .ne("filmId", excludeFilmId));
+
+        if (CollUtil.isEmpty(schedules)) {
+            return ResultUtils.success(Collections.emptyList());
+        }
+
+        Set<Long> cinemaIds = schedules.stream().map(Schedule::getCinemaId).collect(Collectors.toSet());
+        Set<Long> filmIds = schedules.stream().map(Schedule::getFilmId).collect(Collectors.toSet());
+
+        Map<Long, Cinema> cinemaMap = cinemaService.listByIds(cinemaIds).stream()
+                .collect(Collectors.toMap(Cinema::getId, c -> c, (a, b) -> a));
+        Map<Long, Film> filmMap = filmService.listByIds(filmIds).stream()
+                .collect(Collectors.toMap(Film::getId, f -> f, (a, b) -> a));
+
+        Map<Long, Set<Long>> cinemaFilmMap = new LinkedHashMap<>();
+        for (Schedule s : schedules) {
+            cinemaFilmMap.computeIfAbsent(s.getCinemaId(), k -> new LinkedHashSet<>())
+                    .add(s.getFilmId());
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<Long, Set<Long>> entry : cinemaFilmMap.entrySet()) {
+            Long cid = entry.getKey();
+            Cinema cinema = cinemaMap.get(cid);
+            if (cinema == null) continue;
+
+            List<Map<String, Object>> films = entry.getValue().stream()
+                    .map(fid -> {
+                        Film f = filmMap.get(fid);
+                        if (f == null) return null;
+                        Map<String, Object> fm = new LinkedHashMap<>();
+                        fm.put("id", f.getId().toString());
+                        fm.put("name", f.getName());
+                        fm.put("posterUrl", f.getPosterUrl() != null ? f.getPosterUrl() : "");
+                        return fm;
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            Map<String, Object> cm = new LinkedHashMap<>();
+            cm.put("cinemaId", cid.toString());
+            cm.put("cinemaName", cinema.getName() != null ? cinema.getName() : "");
+            cm.put("address", cinema.getAddress() != null ? cinema.getAddress() : "");
+            cm.put("films", films);
+            result.add(cm);
+        }
+
+        return ResultUtils.success(result);
     }
 
     // ========== 后台管理接口 ==========
