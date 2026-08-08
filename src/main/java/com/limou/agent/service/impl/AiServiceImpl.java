@@ -63,9 +63,6 @@ public class AiServiceImpl implements AiService {
     private MovieGraphWorkflow movieGraphWorkflow;
 
     @Resource
-    private GraphResponseGenerator graphResponseGenerator;
-
-    @Resource
     private SmartMovieRouter smartMovieRouter;
 
     @Resource

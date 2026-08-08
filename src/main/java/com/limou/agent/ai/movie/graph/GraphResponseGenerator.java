@@ -1,9 +1,11 @@
 package com.limou.agent.ai.movie.graph;
 
 import com.limou.agent.model.dto.movie.ConversationState;
+import com.limou.agent.rag.DocumentRagService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor;
 import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.stereotype.Component;
 
@@ -62,29 +64,35 @@ public class GraphResponseGenerator {
             7. **严禁编造**：票数/座位/价格/时间/影院等信息必须以工具结果或对话状态为准，缺失时如实告知并询问用户，不要臆测默认值（如"默认两张"）或编造具体座位号。
             """;
 
-    @Resource
-    private DeepSeekChatModel chatModel;
+//    @Resource
+//    private DeepSeekChatModel chatModel;
+//
+//    @Resource
+//    private DocumentRagService documentRagService;
 
     /**
      * 生成回复
      */
-    public String generate(String intent, String userMessage, String toolResult, ConversationState state) {
-        String stateContext = state != null ? state.toPromptContext() : "无";
-        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
-        String prompt = RESPONSE_PROMPT
-                .replace("{today}", today)
-                .replace("{intent}", intent != null ? intent : "chat")
-                .replace("{tool_result}", toolResult != null && !toolResult.isEmpty() ? toolResult : "无工具结果")
-                .replace("{state}", stateContext)
-                .replace("{input}", userMessage);
-
-        try {
-            String response = ChatClient.builder(chatModel).build()
-                    .prompt().user(prompt).call().content();
-            return response != null ? response : "收到啦～让我帮您看看～";
-        } catch (Exception e) {
-            log.error("回复生成失败", e);
-            return "抱歉，出了一点小问题，请稍后再试～";
-        }
-    }
+//    public String generate(String intent, String userMessage, String toolResult, ConversationState state) {
+//        String stateContext = state != null ? state.toPromptContext() : "无";
+//        String today = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
+//        String prompt = RESPONSE_PROMPT
+//                .replace("{today}", today)
+//                .replace("{intent}", intent != null ? intent : "chat")
+//                .replace("{tool_result}", toolResult != null && !toolResult.isEmpty() ? toolResult : "无工具结果")
+//                .replace("{state}", stateContext)
+//                .replace("{input}", userMessage);
+//
+//        try {
+//            String response = ChatClient.builder(chatModel)
+//                    .defaultAdvisors(
+//                            QuestionAnswerAdvisor.builder(documentRagService.getVectorStore()).build())
+//                    .build()
+//                    .prompt().user(prompt).call().content();
+//            return response != null ? response : "收到啦～让我帮您看看～";
+//        } catch (Exception e) {
+//            log.error("回复生成失败", e);
+//            return "抱歉，出了一点小问题，请稍后再试～";
+//        }
+//    }
 }

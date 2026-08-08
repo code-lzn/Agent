@@ -1,15 +1,18 @@
 package com.limou.agent.ai.movie.graph;
 
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.limou.agent.model.dto.movie.ConversationState;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
@@ -58,23 +61,40 @@ public class GraphIntentClassifier {
             """;
 
     @Resource
-    private DeepSeekChatModel chatModel;
+    private DashScopeChatModel dashscopeChatModel;
 
     @Resource
     private ObjectMapper objectMapper;
 
     private ChatClient chatClient;
 
+    /**
+     * 意图分类结果缓存 —— 按 "消息摘要:状态摘要" 缓存，避免相同输入重复调用 LLM
+     * 过期策略：写入后 5 分钟过期，最多 2000 条
+     */
+//    private final Cache<String, GraphIntentResult> intentCache = Caffeine.newBuilder()
+//            .maximumSize(2000)
+//            .expireAfterWrite(Duration.ofMinutes(5))
+//            .recordStats()
+//            .build();
+
     @PostConstruct
     public void init() {
-        // ★ 只复用 ChatClient，不加 defaultOptions（否则覆盖 model/api-key 导致空响应）
-        this.chatClient = ChatClient.builder(chatModel).build();
+        this.chatClient = ChatClient.builder(dashscopeChatModel).build();
     }
 
     /**
      * 意图识别 + 槽位提取
      */
     public GraphIntentResult classify(String userMessage, ConversationState currentState) {
+        // ★ 优化1：缓存命中直接返回，跳过 LLM 调用
+//        String cacheKey = buildCacheKey(userMessage, currentState);
+//        GraphIntentResult cached = intentCache.getIfPresent(cacheKey);
+//        if (cached != null) {
+//            log.debug("Graph Intent 缓存命中: key={}", cacheKey);
+//            return cached;
+//        }
+
         String stateContext = currentState != null ? currentState.toPromptContext() : "无";
         String today = LocalDateTime.now().format(
                 DateTimeFormatter.ofPattern("yyyy-MM-dd EEEE HH:mm", Locale.CHINA));
@@ -84,7 +104,14 @@ public class GraphIntentClassifier {
                 .replace("{input}", userMessage);
 
         try {
-            String raw = chatClient.prompt().user(prompt).call().content();
+            // ★ 优化2：限制 max_tokens=256 + temperature=0，减少生成时间和 token 消耗
+            String raw = chatClient.prompt()
+                    .user(prompt)
+//                    .options(options -> options
+//                            .maxOutputTokens(256)    // 意图 JSON 很小，不需要默认的 4096
+//                            .temperature(0.0))        // 分类任务不需要随机性
+                    .call()
+                    .content();
             String json = cleanJson(raw);
             Map<String, Object> result = objectMapper.readValue(json,
                     new TypeReference<Map<String, Object>>() {});
@@ -125,21 +152,45 @@ public class GraphIntentClassifier {
                 if (slotsMap.get("preferredSeatZone") != null)
                     slots.setPreferredSeatZone((String) slotsMap.get("preferredSeatZone"));
             }
-
+//, cacheKey, cacheKey={}
             log.info("Graph Intent: intent={}, slots={}", intent, slots);
-            return GraphIntentResult.builder()
+            GraphIntentResult intentResult = GraphIntentResult.builder()
                     .intent(intent)
                     .slots(slots)
                     .askPrompt((String) result.get("askPrompt"))
                     .build();
+
+            // ★ 写入缓存
+//            intentCache.put(cacheKey, intentResult);
+            return intentResult;
         } catch (Exception e) {
             log.error("意图识别失败，降级为 chat", e);
-            return GraphIntentResult.builder()
+            GraphIntentResult fallback = GraphIntentResult.builder()
                     .intent("chat")
                     .slots(new ConversationState())
                     .build();
+            // ★ 异常结果也短期缓存，避免重复失败调用（1 分钟）
+//            intentCache.put(cacheKey, fallback);
+            return fallback;
         }
     }
+
+    /**
+     * 构建缓存 key：消息摘要 + 关键槽位变化
+     * 注意：不含时间（today），同一消息不同秒数应命中缓存
+     */
+//    private String buildCacheKey(String userMessage, ConversationState state) {
+//        String msg = userMessage != null ? userMessage.trim() : "";
+//        String stateKey = "";
+//        if (state != null) {
+//            // 只用影响意图的关键字段
+//            stateKey = (state.getFilmId() != null ? "f" + state.getFilmId() : "")
+//                    + (state.getCinemaId() != null ? "c" + state.getCinemaId() : "")
+//                    + (state.getScheduleId() != null ? "s" + state.getScheduleId() : "")
+//                    + (state.getOrderId() != null ? "o" + state.getOrderId() : "");
+//        }
+//        return msg.hashCode() + ":" + stateKey;
+//    }
 
     private String cleanJson(String raw) {
         if (raw == null || raw.isBlank()) return "{}";
